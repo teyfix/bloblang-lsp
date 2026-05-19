@@ -30,7 +30,7 @@ tasks:
       - sh: test -n "{{.ARCH}}"
         msg: Required build variable ARCH is not set
     vars:
-      BIN: "language-server-{{.OS}}-{{.ARCH}}"
+      BIN: "language-server-{{.VERSION}}-{{.OS}}-{{.ARCH}}"
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
     cmds:
       - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/cli/main.go"
