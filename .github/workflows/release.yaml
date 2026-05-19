@@ -34,12 +34,12 @@ jobs:
         uses: go-task/setup-task@v1
 
       - name: Build
-        run: task build
+        run: task build VERSION=${{ env.VERSION }}
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ env.VERSION }}
           files: target/**
           overwrite_files: true
           generate_release_notes: true
