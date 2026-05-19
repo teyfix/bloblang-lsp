@@ -1,0 +1,27 @@
+version: 3
+
+vars:
+  TARGET_DIR: target
+  VERSION:
+    sh: git describe --tags 2>/dev/null | sed 's/^v//' || echo "0.0.0"
+  LD_FLAGS: '{{default "-w -s" .LD_FLAGS}}'
+  DATE_BUILT: '{{now | date "2006-01-02T15:04:05Z"}}'
+  GO_BUILD_CMD: go build {{.GO_FLAGS}} -tags "{{.TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version=v{{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
+
+tasks:
+  build:
+    desc: Build language server
+    env:
+      CGO_ENABLED: 0
+    cmds:
+      - for: { matrix: { OS: [linux, darwin, windows], ARCH: [amd64, arm64] } }
+        task: build:target
+        vars:
+          OS: "{{.ITEM.OS}}"
+          ARCH: "{{.ITEM.ARCH}}"
+
+  build:target:
+    env:
+      CGO_ENABLED: 0
+    cmds:
+      - 'GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/language-server-{{.OS}}-{{.ARCH}}{{if eq .OS "windows"}}.exe{{end}} ./server/main.go'
