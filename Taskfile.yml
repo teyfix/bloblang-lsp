@@ -13,12 +13,15 @@ tasks:
     desc: Build language server
     env:
       CGO_ENABLED: 0
+    vars:
+      COMPRESS: '{{ default true .COMPRESS }}'
     deps:
       - for: { matrix: { OS: [linux, darwin, windows], ARCH: [amd64, arm64] } }
         task: build:target
         vars:
           OS: "{{.ITEM.OS}}"
           ARCH: "{{.ITEM.ARCH}}"
+          COMPRESS: '{{ .COMPRESS }}'
 
   build:target:
     desc: Build language server for a specific OS and architecture
@@ -32,10 +35,26 @@ tasks:
     vars:
       BIN: "language-server-{{.VERSION}}-{{.OS}}-{{.ARCH}}"
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
+      COMPRESS: '{{ default true .COMPRESS }}'
     cmds:
       - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/cli/main.go"
+      - if: '{{ eq .COMPRESS "true" }}'
+        task: build:compress
+        vars:
+          OS: "{{.OS}}"
+          EXT: "{{.EXT}}"
+          BIN: "{{.BIN}}"
+
+  build:compress:
+    desc: Compress language server
+    preconditions:
+      - sh: test -n "{{.OS}}"
+        msg: Required variable OS is not set
+      - sh: test -n "{{.BIN}}"
+        msg: Required variable BIN is not set
+    cmds:
       - if: '{{ eq .OS "windows" }}'
-        cmd: zip -j {{.TARGET_DIR}}/{{.BIN}}.zip {{.TARGET_DIR}}/{{.BIN}}{{.EXT}}
+        cmd: zip -qj {{.TARGET_DIR}}/{{.BIN}}.zip {{.TARGET_DIR}}/{{.BIN}}{{.EXT}}
       - if: '{{ ne .OS "windows" }}'
-        cmd: tar -czvf {{.TARGET_DIR}}/{{.BIN}}.tar.gz -C {{.TARGET_DIR}} {{.BIN}}
+        cmd: tar -czf {{.TARGET_DIR}}/{{.BIN}}.tar.gz -C {{.TARGET_DIR}} {{.BIN}}
       - cmd: rm -f {{.TARGET_DIR}}/{{.BIN}}{{.EXT}}
