@@ -13,7 +13,7 @@ tasks:
     desc: Build language server
     env:
       CGO_ENABLED: 0
-    cmds:
+    deps:
       - for: { matrix: { OS: [linux, darwin, windows], ARCH: [amd64, arm64] } }
         task: build:target
         vars:
@@ -24,4 +24,4 @@ tasks:
     env:
       CGO_ENABLED: 0
     cmds:
-      - 'GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/language-server-{{.OS}}-{{.ARCH}}{{if eq .OS "windows"}}.exe{{end}} ./server/main.go'
+      - 'GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/language-server-{{.OS}}-{{.ARCH}}{{if eq .OS "windows"}}.exe{{end}} ./cmd/cli/main.go'
