@@ -3,10 +3,10 @@ version: 3
 vars:
   TARGET_DIR: target
   VERSION:
-    sh: git describe --tags 2>/dev/null | sed 's/^v//' || echo "0.0.0"
+    sh: test -n "${VERSION}" && echo "${VERSION}"
   LD_FLAGS: '{{default "-w -s" .LD_FLAGS}}'
   DATE_BUILT: '{{now | date "2006-01-02T15:04:05Z"}}'
-  GO_BUILD_CMD: go build {{.GO_FLAGS}} -tags "{{.TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version=v{{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
+  GO_BUILD_CMD: go build {{.GO_FLAGS}} -trimpath -tags "{{.TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version={{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
 
 tasks:
   build:
@@ -21,7 +21,21 @@ tasks:
           ARCH: "{{.ITEM.ARCH}}"
 
   build:target:
+    desc: Build language server for a specific OS and architecture
     env:
       CGO_ENABLED: 0
+    preconditions:
+      - sh: test -n "{{.OS}}"
+        msg: Required build variable OS is not set
+      - sh: test -n "{{.ARCH}}"
+        msg: Required build variable ARCH is not set
+    vars:
+      BIN: "language-server-{{.OS}}-{{.ARCH}}"
+      EXT: '{{if eq .OS "windows"}}.exe{{end}}'
     cmds:
-      - 'GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/language-server-{{.OS}}-{{.ARCH}}{{if eq .OS "windows"}}.exe{{end}} ./cmd/cli/main.go'
+      - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/cli/main.go"
+      - if: '{{ eq .OS "windows" }}'
+        cmd: zip -j {{.TARGET_DIR}}/{{.BIN}}.zip {{.TARGET_DIR}}/{{.BIN}}{{.EXT}}
+      - if: '{{ ne .OS "windows" }}'
+        cmd: tar -czvf {{.TARGET_DIR}}/{{.BIN}}.tar.gz -C {{.TARGET_DIR}} {{.BIN}}
+      - cmd: rm -f {{.TARGET_DIR}}/{{.BIN}}{{.EXT}}

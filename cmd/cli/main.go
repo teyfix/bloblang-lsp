@@ -28,10 +28,10 @@ import (
 	"github.com/tliron/glsp/server"
 )
 
-const lsName = "bloblang"
+var Name = "bloblang"
+var Version = "v0.0.1"
+var BloblangDocsURL = "https://docs.redpanda.com/redpanda-connect/guides/bloblang"
 
-var version = "0.0.1"
-var bloblangDocsUrl = "https://docs.redpanda.com/redpanda-connect/guides/bloblang"
 var bloblangCompletionCache []protocol.CompletionItem
 var bloblangFunctionDocs map[string]bloblang.TemplateFunctionData
 var bloblangMethodDocs map[string]bloblang.TemplateMethodData
@@ -89,7 +89,7 @@ func main() {
 		TextDocumentHover:      hover,
 	}
 
-	s := server.NewServer(&handler, lsName, false)
+	s := server.NewServer(&handler, Name, false)
 	s.RunStdio()
 }
 
@@ -100,8 +100,8 @@ func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, 
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
 		ServerInfo: &protocol.InitializeResultServerInfo{
-			Name:    lsName,
-			Version: &version,
+			Name:    Name,
+			Version: &Version,
 		},
 	}, nil
 }
@@ -339,7 +339,7 @@ func buildDocumentation(
 ) protocol.MarkupContent {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# [%s](%s/%s/#%s) – %s\n\n", name, bloblangDocsUrl, kind, name, kind))
+	sb.WriteString(fmt.Sprintf("# [%s](%s/%s/#%s) – %s\n\n", name, BloblangDocsURL, kind, name, kind))
 
 	// Status badge — shown at the top so it's immediately visible on hover.
 	switch status {
@@ -426,7 +426,7 @@ func buildDocumentation(
 
 		for _, c := range categories {
 			sb.WriteString(
-				fmt.Sprintf("### [%s](%s/methods/#%s)\n\n", c.Category, bloblangDocsUrl, toKebabCase(c.Category)),
+				fmt.Sprintf("### [%s](%s/methods/#%s)\n\n", c.Category, BloblangDocsURL, toKebabCase(c.Category)),
 			)
 
 			if c.Description != "" {
