@@ -3,6 +3,7 @@ module github.com/teyfix/bloblang-lsp
 go 1.26.3
 
 require (
+	github.com/dustin/go-humanize v1.0.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/owenrumney/go-lsp v0.2.2
 	github.com/redpanda-data/benthos/v4 v4.73.0
@@ -39,7 +40,6 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
