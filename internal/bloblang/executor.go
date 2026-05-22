@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
 	"github.com/teyfix/bloblang-lsp/internal/config"
+	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
 )
 
 type PartialResult struct {
@@ -80,6 +81,12 @@ func (e *Executor) ExecutePartial(uri string, sample interface{}, docText string
 	text := full
 	truncated := false
 	if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
+		full = string(pretty.PrettyOptions(encoded, &pretty.Options{
+			Width:    e.config.MaxInlineResultBytes,
+			Prefix:   "",
+			Indent:   "  ",
+			SortKeys: false,
+		}))
 		text = text[:e.config.MaxInlineResultBytes] + "..."
 		truncated = true
 	}
