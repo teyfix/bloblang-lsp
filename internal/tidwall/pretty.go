@@ -248,20 +248,18 @@ func parsestr(s []byte) []byte {
 func appendPrettyObject(buf, json []byte, i int, open, close byte, pretty bool, width int, prefix, indent string, sortkeys bool, tabs, nl, max int) ([]byte, int, int, bool) {
 	var ok bool
 	if width > 0 {
-		if pretty && open == '[' && max == -1 {
-			// here we try to create a single line array
+		if pretty && (open == '[' || open == '{') && max == -1 {
+			// here we try to create a single line array or object
 			max := width - (len(buf) - nl)
 			if max > 3 {
 				s1, s2 := len(buf), i
-				buf, i, _, ok = appendPrettyObject(buf, json, i, '[', ']', false, width, prefix, "", sortkeys, 0, 0, max)
+				buf, i, _, ok = appendPrettyObject(buf, json, i, open, close, false, width, prefix, "", sortkeys, 0, 0, max)
 				if ok && len(buf)-s1 <= max {
 					return buf, i, nl, true
 				}
 				buf = buf[:s1]
 				i = s2
 			}
-		} else if max != -1 && open == '{' {
-			return buf, i, nl, false
 		}
 	}
 	buf = append(buf, open)
@@ -293,12 +291,12 @@ func appendPrettyObject(buf, json []byte, i int, open, close byte, pretty bool, 
 				}
 			}
 			buf = append(buf, close)
-			return buf, i + 1, nl, open != '{'
+			return buf, i + 1, nl, true
 		}
 		if open == '[' || json[i] == '"' {
 			if n > 0 {
 				buf = append(buf, ',')
-				if width != -1 && open == '[' {
+				if width != -1 {
 					buf = append(buf, ' ')
 				}
 			}
@@ -322,7 +320,7 @@ func appendPrettyObject(buf, json []byte, i int, open, close byte, pretty bool, 
 					p.kend = i
 				}
 				buf = append(buf, ':')
-				if pretty {
+				if pretty || width != -1 {
 					buf = append(buf, ' ')
 				}
 			}
@@ -343,7 +341,7 @@ func appendPrettyObject(buf, json []byte, i int, open, close byte, pretty bool, 
 			n++
 		}
 	}
-	return buf, i, nl, open != '{'
+	return buf, i, nl, true
 }
 func sortPairs(json, buf []byte, pairs []pair) []byte {
 	if len(pairs) == 0 {
