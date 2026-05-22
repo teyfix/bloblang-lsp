@@ -22,12 +22,12 @@ func renderCodeBlock(value string) string {
 		pretty, err := json.MarshalIndent(parsed, "", "  ")
 		if err == nil {
 			single := regexp.MustCompile(`\n\s*`).ReplaceAllString(string(pretty), " ")
-			return "```json\n" + single + "\n```\n"
+			return fmt.Sprintf("```json\n%s\n```\n", single)
 		}
 	}
 
 	// Fallback
-	return "```txt\n" + value + "\n```\n"
+	return fmt.Sprintf("```txt\n%s\n```\n", value)
 }
 
 func toKebabCase(s string) string {

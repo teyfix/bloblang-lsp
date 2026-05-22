@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
@@ -226,7 +227,7 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 		}
 		return &protocol.Hover{Contents: protocol.MarkupContent{
 			Kind:  protocol.Markdown,
-			Value: "```json\n" + result.Full + "\n```",
+			Value: fmt.Sprintf("```json\n%s\n```", result.Full),
 		}}, nil
 	}
 

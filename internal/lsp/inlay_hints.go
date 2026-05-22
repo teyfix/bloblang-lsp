@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func (h *Handler) InlayHint(_ context.Context, params *protocol.InlayHintParams)
 			Label:    label,
 			Tooltip: &protocol.MarkupContent{
 				Kind:  protocol.Markdown,
-				Value: "```json\n" + result.Full + "\n```",
+				Value: fmt.Sprintf("```json\n%s\n```", result.Full),
 			},
 		})
 	}
