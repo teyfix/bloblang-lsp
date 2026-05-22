@@ -37,7 +37,7 @@ tasks:
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
       COMPRESS: '{{ default true .COMPRESS }}'
     cmds:
-      - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/cli/main.go"
+      - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/bloblang-lsp/main.go"
       - if: '{{ eq .COMPRESS "true" }}'
         task: build:compress
         vars:
