@@ -19,27 +19,6 @@ func testExecutorConfig() *config.Config {
 	}
 }
 
-func TestExecutePartial(t *testing.T) {
-	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
-	result, err := executor.ExecutePartial("file:///map.blobl", map[string]interface{}{"name": "alice"}, "root = this.name", 0)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, `"alice"`, result.Text)
-	assert.False(t, result.Truncated)
-}
-
-func TestExecutePartialTruncates(t *testing.T) {
-	cfg := testExecutorConfig()
-	cfg.MaxInlineResultBytes = 5
-	executor := NewExecutor(NewEnvironment(), cfg)
-	result, err := executor.ExecutePartial("file:///map.blobl", map[string]interface{}{"name": "alice"}, "root = this.name", 0)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.True(t, result.Truncated)
-	assert.Equal(t, `"alic...`, result.Text)
-	assert.Equal(t, `"alice"`, result.Full)
-}
-
 func TestExecuteCumulativeSingleLine(t *testing.T) {
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	doc := "#!sample {\"name\":\"alice\",\"age\":30}\nroot.name = this.name"
@@ -97,28 +76,6 @@ func TestExecuteCumulativeInvalidatesCache(t *testing.T) {
 	result, err = executor.ExecuteCumulative(uri, map[string]interface{}{"name": "bob"}, doc, 1)
 	require.NoError(t, err)
 	require.Equal(t, `{"name":"bob"}`, result.Text)
-}
-
-func TestExecutePartialSkipsLargeDocument(t *testing.T) {
-	cfg := testExecutorConfig()
-	cfg.MaxInlineDocumentBytes = 10
-	executor := NewExecutor(NewEnvironment(), cfg)
-	result, err := executor.ExecutePartial("file:///map.blobl", map[string]interface{}{"name": "alice"}, "root = this.name", 0)
-	require.NoError(t, err)
-	assert.Nil(t, result)
-}
-
-func TestExecutePartialInvalidatesCache(t *testing.T) {
-	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
-	uri := "file:///map.blobl"
-	result, err := executor.ExecutePartial(uri, map[string]interface{}{"name": "alice"}, "root = this.name", 0)
-	require.NoError(t, err)
-	require.Equal(t, `"alice"`, result.Text)
-
-	executor.InvalidateDocument(uri)
-	result, err = executor.ExecutePartial(uri, map[string]interface{}{"name": "bob"}, "root = this.name", 0)
-	require.NoError(t, err)
-	require.Equal(t, `"bob"`, result.Text)
 }
 
 func TestStatementEnd(t *testing.T) {

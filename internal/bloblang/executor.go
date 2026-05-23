@@ -41,66 +41,6 @@ func NewExecutor(benv *bloblang.Environment, cfg *config.Config) *Executor {
 	}
 }
 
-func (e *Executor) ExecutePartial(uri string, sample interface{}, docText string, rootLine int) (*PartialResult, error) {
-	if len(docText) > e.config.MaxInlineDocumentBytes {
-		return nil, nil
-	}
-	key := uri + ":" + strconv.Itoa(rootLine)
-	if result, ok := e.cache.Get(key); ok {
-		return result, nil
-	}
-
-	lines := strings.Split(docText, "\n")
-	if rootLine < 0 || rootLine >= len(lines) {
-		return nil, fmt.Errorf("root line out of range")
-	}
-
-	end := StatementEnd(lines, rootLine)
-	var parsed *bloblang.Executor
-	var err error
-	for attempts := 0; attempts < 4; attempts++ {
-		truncated := strings.Join(lines[rootLine:end], "\n")
-		parsed, err = e.benv.Parse(truncated)
-		if err == nil {
-			break
-		}
-		if end >= len(lines) || !looksIncomplete(err) {
-			return nil, err
-		}
-		end++
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	value, err := parsed.Query(sample)
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-
-	full := string(encoded)
-	text := full
-	truncated := false
-	if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
-		full = strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
-			Width:    e.config.MaxInlineResultBytes,
-			Prefix:   "",
-			Indent:   "  ",
-			SortKeys: false,
-		})), "\n")
-		text = text[:e.config.MaxInlineResultBytes] + "..."
-		truncated = true
-	}
-
-	result := &PartialResult{Text: text, Truncated: truncated, Full: full}
-	e.cache.Add(key, result)
-	return result, nil
-}
-
 // ExecuteCumulative executes all root-assignment statements from the beginning of the
 // document through throughLine (inclusive) and returns the resulting value.
 //
