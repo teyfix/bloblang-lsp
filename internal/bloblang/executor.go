@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
+	"github.com/teyfix/bloblang-lsp/internal/ascii"
 	"github.com/teyfix/bloblang-lsp/internal/config"
 	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
 )
@@ -76,7 +77,7 @@ func (e *Executor) ExecuteCumulative(uri string, sample interface{}, docText str
 				Indent:   "  ",
 				SortKeys: false,
 			})), "\n")
-			text = text[:e.config.MaxInlineResultBytes] + "..."
+			text = text[:e.config.MaxInlineResultBytes] + ascii.Ellipsis
 			truncated = true
 		}
 		result := &PartialResult{Text: text, Truncated: truncated, Full: full}
@@ -136,7 +137,7 @@ func (e *Executor) ExecuteCumulative(uri string, sample interface{}, docText str
 			Indent:   "  ",
 			SortKeys: false,
 		})), "\n")
-		text = text[:e.config.MaxInlineResultBytes] + "..."
+		text = text[:e.config.MaxInlineResultBytes] + ascii.Ellipsis
 		truncated = true
 	}
 
