@@ -116,13 +116,16 @@ func TestIntegrationInlayHintsAndCodeLens(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/inlay.blobl"
 	h.OpenDocument(uri, "#!sample {\"name\":\"alice\"}\nroot = this.name")
+
+	// Inlay hint shows the OUTPUT after the line: root = this.name → "alice"
 	hints := h.GetInlayHints(uri)
 	testutil.AssertInlayHintAt(t, hints, 1, `= "alice"`)
 
+	// Code lens shows the INPUT before the line: no prior assignments → raw sample {"name":"alice"}
 	lenses := h.GetCodeLenses(uri)
 	require.Len(t, lenses, 1)
 	require.NotNil(t, lenses[0].Command)
-	assert.Equal(t, `"alice"`, lenses[0].Command.Title)
+	assert.Contains(t, lenses[0].Command.Title, "alice")
 }
 
 func TestIntegrationNoSampleInlayHintsEmpty(t *testing.T) {
@@ -171,4 +174,47 @@ func TestIntegrationRootHoverNonAssignment(t *testing.T) {
 	h.OpenDocument(uri, "let root = \"value\"")
 	hover := h.GetHover(uri, protocol.Position{Line: 0, Character: 5})
 	assert.Nil(t, hover)
+}
+
+func TestIntegrationSubPathInlayHintsAndCodeLens(t *testing.T) {
+	h := testutil.NewHarness(t)
+	uri := "file:///tmp/subpath.blobl"
+	// sub-path assignment: root.name = this.name
+	h.OpenDocument(uri, "#!sample {\"name\":\"alice\"}\nroot.name = this.name")
+
+	// inlay hint should appear on line 1 showing the output {"name":"alice"}
+	hints := h.GetInlayHints(uri)
+	testutil.AssertInlayHintAt(t, hints, 1, `"alice"`)
+
+	// code lens should appear on line 1
+	lenses := h.GetCodeLenses(uri)
+	require.Len(t, lenses, 1)
+	require.NotNil(t, lenses[0].Command)
+}
+
+func TestIntegrationCumulativeLensesAndHints(t *testing.T) {
+	h := testutil.NewHarness(t)
+	uri := "file:///tmp/cumulative.blobl"
+	doc := "#!sample {\"name\":\"alice\",\"age\":30}\nroot.name = this.name\nroot.age = this.age"
+	h.OpenDocument(uri, doc)
+
+	// inlay hints: line 1 shows output after first assignment → {"name":"alice"}
+	//              line 2 shows output after both assignments → {"age":30,"name":"alice"}
+	hints := h.GetInlayHints(uri)
+	testutil.AssertInlayHintAt(t, hints, 1, `"alice"`)
+	testutil.AssertInlayHintAt(t, hints, 2, `"age"`)
+
+	// code lenses: line 1 shows input before first assignment → raw sample
+	//              line 2 shows input before second assignment → {"name":"alice"}
+	lenses := h.GetCodeLenses(uri)
+	require.Len(t, lenses, 2)
+
+	// lens on line 1 (before any assignment) → raw sample contains "alice" and "age":30
+	assert.Equal(t, 1, lenses[0].Range.Start.Line)
+	assert.Contains(t, lenses[0].Command.Title, "alice")
+
+	// lens on line 2 (after first assignment) → {"name":"alice"} only
+	assert.Equal(t, 2, lenses[1].Range.Start.Line)
+	assert.Contains(t, lenses[1].Command.Title, "alice")
+	assert.NotContains(t, lenses[1].Command.Title, "age")
 }

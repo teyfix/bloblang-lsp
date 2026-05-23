@@ -26,7 +26,7 @@ func (h *Handler) InlayHint(_ context.Context, params *protocol.InlayHintParams)
 		if !rootAssignRe.MatchString(line) {
 			continue
 		}
-		result, err := h.executor.ExecutePartial(string(uri), sample.Value, text, lineIdx)
+		result, err := h.executor.ExecuteCumulative(string(uri), sample.Value, text, lineIdx)
 		if err != nil || result == nil {
 			continue
 		}

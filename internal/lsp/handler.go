@@ -221,7 +221,7 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 				Value: "Provide a sample with `#!sample {\"key\": \"value\"}`",
 			}}, nil
 		}
-		result, err := h.executor.ExecutePartial(string(uri), sample.Value, text, lineIdx)
+		result, err := h.executor.ExecuteCumulative(string(uri), sample.Value, text, lineIdx)
 		if err != nil || result == nil {
 			return nil, nil
 		}

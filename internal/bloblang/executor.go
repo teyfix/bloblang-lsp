@@ -3,6 +3,7 @@ package bloblang
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/teyfix/bloblang-lsp/internal/config"
 	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
 )
+
+// rootAssignLineRe matches any line that starts a root assignment (simple, dot, or bracket path).
+// This mirrors the lsp.rootAssignRe pattern but lives here to avoid an import cycle.
+var rootAssignLineRe = regexp.MustCompile(`^\s*root[\s.\[].*=`)
 
 type PartialResult struct {
 	Text      string
@@ -81,12 +86,118 @@ func (e *Executor) ExecutePartial(uri string, sample interface{}, docText string
 	text := full
 	truncated := false
 	if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
-		full = string(pretty.PrettyOptions(encoded, &pretty.Options{
+		full = strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
 			Width:    e.config.MaxInlineResultBytes,
 			Prefix:   "",
 			Indent:   "  ",
 			SortKeys: false,
-		}))
+		})), "\n")
+		text = text[:e.config.MaxInlineResultBytes] + "..."
+		truncated = true
+	}
+
+	result := &PartialResult{Text: text, Truncated: truncated, Full: full}
+	e.cache.Add(key, result)
+	return result, nil
+}
+
+// ExecuteCumulative executes all root-assignment statements from the beginning of the
+// document through throughLine (inclusive) and returns the resulting value.
+//
+// throughLine == -1 is a special case meaning "before any assignment"; in that case
+// the raw sample is returned as-is (marshalled to JSON).
+//
+// This is used by code lenses (pass throughLine = lineIdx-1 to show the input state
+// before the line) and inlay hints (pass throughLine = lineIdx to show the output
+// state after the line).
+func (e *Executor) ExecuteCumulative(uri string, sample interface{}, docText string, throughLine int) (*PartialResult, error) {
+	if len(docText) > e.config.MaxInlineDocumentBytes {
+		return nil, nil
+	}
+
+	key := uri + ":cumulative:" + strconv.Itoa(throughLine)
+	if result, ok := e.cache.Get(key); ok {
+		return result, nil
+	}
+
+	// Special case: before any assignment — return the raw sample.
+	if throughLine < 0 {
+		encoded, err := json.Marshal(sample)
+		if err != nil {
+			return nil, err
+		}
+		full := string(encoded)
+		text := full
+		truncated := false
+		if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
+			full = strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
+				Width:    e.config.MaxInlineResultBytes,
+				Prefix:   "",
+				Indent:   "  ",
+				SortKeys: false,
+			})), "\n")
+			text = text[:e.config.MaxInlineResultBytes] + "..."
+			truncated = true
+		}
+		result := &PartialResult{Text: text, Truncated: truncated, Full: full}
+		e.cache.Add(key, result)
+		return result, nil
+	}
+
+	lines := strings.Split(docText, "\n")
+	if throughLine >= len(lines) {
+		return nil, fmt.Errorf("through line out of range")
+	}
+
+	// Collect all root-assignment statement blocks from line 0 through throughLine.
+	var snippetLines []string
+	i := 0
+	for i <= throughLine {
+		line := lines[i]
+		if rootAssignLineRe.MatchString(line) {
+			// Include this line and any continuation lines (non-empty, non-root, non-let).
+			end := statementEnd(lines, i)
+			// Clamp to throughLine so we don't include lines beyond the requested boundary.
+			if end > throughLine+1 {
+				end = throughLine + 1
+			}
+			snippetLines = append(snippetLines, lines[i:end]...)
+			i = end
+		} else {
+			i++
+		}
+	}
+
+	if len(snippetLines) == 0 {
+		// No root assignments up to throughLine — return raw sample.
+		return e.ExecuteCumulative(uri, sample, docText, -1)
+	}
+
+	snippet := strings.Join(snippetLines, "\n")
+	parsed, err := e.benv.Parse(snippet)
+	if err != nil {
+		return nil, err
+	}
+
+	value, err := parsed.Query(sample)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+
+	full := string(encoded)
+	text := full
+	truncated := false
+	if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
+		full = strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
+			Width:    e.config.MaxInlineResultBytes,
+			Prefix:   "",
+			Indent:   "  ",
+			SortKeys: false,
+		})), "\n")
 		text = text[:e.config.MaxInlineResultBytes] + "..."
 		truncated = true
 	}
