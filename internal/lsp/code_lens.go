@@ -47,13 +47,9 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 		command := protocol.Command{Title: result.Text}
 		if result.Truncated {
 			command = protocol.Command{
-				Title:   fmt.Sprintf("Show full result (%s)", humanize.Bytes(uint64(len(result.Full)))),
-				Command: "bloblang-lsp.showResult",
-				Arguments: []json.RawMessage{
-					rawJSON(string(uri)),
-					rawJSON(lineIdx),
-					rawJSON(result.Full),
-				},
+				Title:     fmt.Sprintf("Show full result (%s)", humanize.Bytes(uint64(len(result.Full)))),
+				Command:   "bloblang-lsp.showResult",
+				Arguments: []json.RawMessage{[]byte(result.Full)},
 			}
 		}
 		lenses = append(lenses, protocol.CodeLens{
