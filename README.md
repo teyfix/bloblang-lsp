@@ -2,7 +2,14 @@
 
 A [Language Server Protocol (LSP)](https://microsoft.github.io/language-server-protocol/) implementation for [Bloblang](https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/), the powerful mapping language used in [Redpanda Connect](https://docs.redpanda.com/redpanda-connect/).
 
+![Inline sampling](docs/inline-sample-demo.gif)
+
 ## Features
+
+- **Real-time Inline Sampling** — Test your mappings live as you type
+  - Define JSON sample inputs directly in your file using the `#!sample {...}` directive, or from a file using `#!sample_from ...`
+  - Instantly see the evaluated output of your Bloblang transformations displayed inline above your code
+  - Iterate rapidly on complex mappings without needing to run external testing tools or CLIs
 
 - **Intelligent Code Completion** — Auto-complete Bloblang functions and methods with contextual awareness
   - Function completions triggered after operators like `=`, `(`, `{`, `[`, `|`, `;`
@@ -33,17 +40,17 @@ A [Language Server Protocol (LSP)](https://microsoft.github.io/language-server-p
 Download the latest release for your platform from the [Releases](https://github.com/teyfix/bloblang-lsp/releases) page:
 
 | Platform | Architectures |
-|----------|--------------|
-| Linux    | amd64, arm64 |
-| macOS    | amd64, arm64 |
-| Windows  | amd64, arm64 |
+| -------- | ------------- |
+| Linux    | amd64, arm64  |
+| macOS    | amd64, arm64  |
+| Windows  | amd64, arm64  |
 
 ### From Source
 
 Requires [Go](https://go.dev/) 1.26+ and [Task](https://taskfile.dev/):
 
 ```bash
-git clone https://github.com/teyfix/bloblang-lsp.git
+git clone [https://github.com/teyfix/bloblang-lsp.git](https://github.com/teyfix/bloblang-lsp.git)
 cd bloblang-lsp
 task build
 ```
@@ -87,14 +94,14 @@ require'lspconfig'.bloblang.setup{
 
 ## Supported LSP Capabilities
 
-| Feature | Method | Status |
-|---------|--------|--------|
-| Text Document Sync | `textDocument/didOpen` | ✅ Full document sync |
-| | `textDocument/didChange` | ✅ |
-| | `textDocument/didClose` | ✅ |
-| Completion | `textDocument/completion` | ✅ Functions, methods, variables |
-| Hover | `textDocument/hover` | ✅ Function/method docs |
-| Diagnostics | `textDocument/publishDiagnostics` | ✅ Parse errors |
+| Feature            | Method                            | Status                           |
+| ------------------ | --------------------------------- | -------------------------------- |
+| Text Document Sync | `textDocument/didOpen`            | ✅ Full document sync            |
+|                    | `textDocument/didChange`          | ✅                               |
+|                    | `textDocument/didClose`           | ✅                               |
+| Completion         | `textDocument/completion`         | ✅ Functions, methods, variables |
+| Hover              | `textDocument/hover`              | ✅ Function/method docs          |
+| Diagnostics        | `textDocument/publishDiagnostics` | ✅ Parse errors                  |
 
 ## Architecture
 
@@ -127,7 +134,7 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](./LICENSE)
 
 ## Acknowledgments
 
