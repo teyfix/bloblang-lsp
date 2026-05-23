@@ -218,3 +218,31 @@ func TestIntegrationCumulativeLensesAndHints(t *testing.T) {
 	assert.Contains(t, lenses[1].Command.Title, "alice")
 	assert.NotContains(t, lenses[1].Command.Title, "age")
 }
+
+func TestIntegrationMultilineInlayHint(t *testing.T) {
+	h := testutil.NewHarness(t)
+	uri := "file:///tmp/multiline.blobl"
+	// Multi-line assignment: root.msg spans lines 1-3
+	doc := "#!sample {\"message\":\"hello world\"}\nroot.msg = this.\n  message.\n  replace(\"hello\", \"good morning\")"
+	h.OpenDocument(uri, doc)
+
+	hints := h.GetInlayHints(uri)
+	// Inlay hint should appear on the LAST line of the statement (line 3), not line 1
+	testutil.AssertInlayHintAt(t, hints, 3, "good morning")
+}
+
+func TestIntegrationExecDiagnostic(t *testing.T) {
+	h := testutil.NewHarness(t)
+	uri := "file:///tmp/exec-diag.blobl"
+	// this.name is null (not in sample) → calling .uppercase() on null errors at runtime
+	h.OpenDocument(uri, "#!sample {}\nroot = this.name.uppercase()")
+
+	// Trigger inlay hints — this runs ExecuteCumulative which will fail and publish a warning diagnostic.
+	h.GetInlayHints(uri)
+
+	// publishExecDiagnostics calls publishDiagnostics synchronously from the InlayHint handler.
+	// Use Diagnostics(uri) to get the most recently published set for this URI.
+	diags := h.Server.Diagnostics(protocol.DocumentURI(uri))
+	// Should have a warning diagnostic on line 1 (the failing root assignment)
+	testutil.AssertDiagnosticAt(t, diags, 1, "")
+}

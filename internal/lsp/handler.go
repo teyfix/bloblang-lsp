@@ -51,6 +51,9 @@ type Handler struct {
 	lastDiagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	lastDiagnosticsMu sync.RWMutex
 	validationHook    func(protocol.DocumentURI, []protocol.Diagnostic)
+
+	execDiagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
+	execDiagnosticsMu sync.RWMutex
 }
 
 func NewHandler(cfg *config.Config, logger *slog.Logger, benv *redbloblang.Environment, items []protocol.CompletionItem, functionDocs map[string]protocol.MarkupContent, methodDocs map[string]protocol.MarkupContent, executor *bloblangpkg.Executor) *Handler {
@@ -73,6 +76,7 @@ func NewHandler(cfg *config.Config, logger *slog.Logger, benv *redbloblang.Envir
 		inlayCancel:       make(map[protocol.DocumentURI]context.CancelFunc),
 		lensCancel:        make(map[protocol.DocumentURI]context.CancelFunc),
 		lastDiagnostics:   make(map[protocol.DocumentURI][]protocol.Diagnostic),
+		execDiagnostics:   make(map[protocol.DocumentURI][]protocol.Diagnostic),
 	}
 }
 
@@ -129,6 +133,7 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	h.importBasesMu.Unlock()
 	h.updateSample(uri, doc.Text())
 	h.executor.InvalidateDocument(string(uri))
+	h.clearExecDiagnostics(uri)
 	h.scheduleValidation(uri)
 	h.scheduleRefresh(uri)
 	if h.config.DiagnosticsDebounce == 0 {
@@ -145,6 +150,7 @@ func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextD
 	uri := params.TextDocument.URI
 	h.updateSample(uri, doc.Text())
 	h.executor.InvalidateDocument(string(uri))
+	h.clearExecDiagnostics(uri)
 	h.scheduleValidation(uri)
 	h.scheduleRefresh(uri)
 	if h.config.DiagnosticsDebounce == 0 {
@@ -331,6 +337,39 @@ func (h *Handler) sampleDiagnosticsFor(uri protocol.DocumentURI) []protocol.Diag
 	h.sampleDiagnosticsMu.RLock()
 	defer h.sampleDiagnosticsMu.RUnlock()
 	return append([]protocol.Diagnostic(nil), h.sampleDiagnostics[uri]...)
+}
+
+// clearExecDiagnostics removes any previously stored execution diagnostics for uri.
+// Called on DidOpen/DidChange so stale errors don't persist after the document is edited.
+func (h *Handler) clearExecDiagnostics(uri protocol.DocumentURI) {
+	h.execDiagnosticsMu.Lock()
+	delete(h.execDiagnostics, uri)
+	h.execDiagnosticsMu.Unlock()
+}
+
+// publishExecDiagnostics stores the given execution-time diagnostics for uri and
+// re-publishes the merged set (last known parse/import diagnostics + exec diagnostics).
+// Passing an empty or nil slice clears any previously stored exec diagnostics.
+func (h *Handler) publishExecDiagnostics(ctx context.Context, uri protocol.DocumentURI, diags []protocol.Diagnostic) {
+	h.execDiagnosticsMu.Lock()
+	if len(diags) == 0 {
+		delete(h.execDiagnostics, uri)
+	} else {
+		h.execDiagnostics[uri] = append([]protocol.Diagnostic(nil), diags...)
+	}
+	h.execDiagnosticsMu.Unlock()
+
+	// Merge with the last known parse/import diagnostics and republish.
+	h.lastDiagnosticsMu.RLock()
+	base := append([]protocol.Diagnostic(nil), h.lastDiagnostics[uri]...)
+	h.lastDiagnosticsMu.RUnlock()
+
+	h.execDiagnosticsMu.RLock()
+	exec := append([]protocol.Diagnostic(nil), h.execDiagnostics[uri]...)
+	h.execDiagnosticsMu.RUnlock()
+
+	merged := append(base, exec...)
+	h.publishDiagnostics(ctx, uri, merged)
 }
 
 func sampleDirectiveLine(text string) int {

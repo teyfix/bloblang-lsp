@@ -55,7 +55,7 @@ func (e *Executor) ExecutePartial(uri string, sample interface{}, docText string
 		return nil, fmt.Errorf("root line out of range")
 	}
 
-	end := statementEnd(lines, rootLine)
+	end := StatementEnd(lines, rootLine)
 	var parsed *bloblang.Executor
 	var err error
 	for attempts := 0; attempts < 4; attempts++ {
@@ -150,17 +150,15 @@ func (e *Executor) ExecuteCumulative(uri string, sample interface{}, docText str
 	}
 
 	// Collect all root-assignment statement blocks from line 0 through throughLine.
+	// "through throughLine" means: include all statements whose START line is <= throughLine.
+	// Each statement is allowed to extend beyond throughLine via its continuation lines.
 	var snippetLines []string
 	i := 0
 	for i <= throughLine {
 		line := lines[i]
 		if rootAssignLineRe.MatchString(line) {
-			// Include this line and any continuation lines (non-empty, non-root, non-let).
-			end := statementEnd(lines, i)
-			// Clamp to throughLine so we don't include lines beyond the requested boundary.
-			if end > throughLine+1 {
-				end = throughLine + 1
-			}
+			// Include this line and all its continuation lines (no clamping).
+			end := StatementEnd(lines, i)
 			snippetLines = append(snippetLines, lines[i:end]...)
 			i = end
 		} else {
@@ -216,7 +214,7 @@ func (e *Executor) InvalidateDocument(uri string) {
 	}
 }
 
-func statementEnd(lines []string, rootLine int) int {
+func StatementEnd(lines []string, rootLine int) int {
 	end := rootLine + 1
 	for end < len(lines) {
 		line := lines[end]

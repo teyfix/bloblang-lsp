@@ -8,9 +8,10 @@ import (
 	"time"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
+	bloblangpkg "github.com/teyfix/bloblang-lsp/internal/bloblang"
 )
 
-func (h *Handler) InlayHint(_ context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
+func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
 	uri := params.TextDocument.URI
 	sample := h.getSample(uri)
 	if sample == nil {
@@ -22,17 +23,34 @@ func (h *Handler) InlayHint(_ context.Context, params *protocol.InlayHintParams)
 	}
 	lines := strings.Split(text, "\n")
 	hints := make([]protocol.InlayHint, 0)
+	var execErrs []protocol.Diagnostic
+	severity := protocol.SeverityWarning
 	for lineIdx, line := range lines {
 		if !rootAssignRe.MatchString(line) {
 			continue
 		}
+		// Compute the last line of this (possibly multi-line) statement.
+		lastLine := bloblangpkg.StatementEnd(lines, lineIdx) - 1
 		result, err := h.executor.ExecuteCumulative(string(uri), sample.Value, text, lineIdx)
-		if err != nil || result == nil {
+		if err != nil {
+			execErrs = append(execErrs, protocol.Diagnostic{
+				Range: protocol.Range{
+					Start: protocol.Position{Line: lineIdx, Character: 0},
+					End:   protocol.Position{Line: lineIdx, Character: len(line)},
+				},
+				Severity: &severity,
+				Source:   "bloblang",
+				Message:  err.Error(),
+			})
 			continue
 		}
+		if result == nil {
+			continue
+		}
+		lastLineText := lines[lastLine]
 		label, _ := json.Marshal(" = " + result.Text)
 		hints = append(hints, protocol.InlayHint{
-			Position: protocol.Position{Line: lineIdx, Character: len(line)},
+			Position: protocol.Position{Line: lastLine, Character: len(lastLineText)},
 			Label:    label,
 			Tooltip: &protocol.MarkupContent{
 				Kind:  protocol.Markdown,
@@ -40,6 +58,7 @@ func (h *Handler) InlayHint(_ context.Context, params *protocol.InlayHintParams)
 			},
 		})
 	}
+	h.publishExecDiagnostics(ctx, uri, execErrs)
 	return hints, nil
 }
 
