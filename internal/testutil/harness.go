@@ -9,7 +9,6 @@ import (
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/owenrumney/go-lsp/servertest"
-	bloblangpkg "github.com/teyfix/bloblang-lsp/internal/bloblang"
 	"github.com/teyfix/bloblang-lsp/internal/config"
 	lsppkg "github.com/teyfix/bloblang-lsp/internal/lsp"
 )
@@ -31,11 +30,8 @@ func NewHarness(t *testing.T) *Harness {
 		PartialExecCacheSize:   100,
 		PartialExecCacheTTL:    time.Minute,
 	}
-	benv := bloblangpkg.NewEnvironment()
-	items, fnData, methData := bloblangpkg.BuildCompletionCache(benv)
-	fnDocs, methDocs := bloblangpkg.BuildAllDocs(fnData, methData, cfg.BloblangDocsURL)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	handler := lsppkg.NewHandler(cfg, logger, benv, items, fnDocs, methDocs, bloblangpkg.NewExecutor(benv, cfg))
+	handler := lsppkg.NewHandler(cfg, logger)
 	return &Harness{t: t, Server: servertest.New(t, handler)}
 }
 

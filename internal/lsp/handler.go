@@ -56,17 +56,19 @@ type Handler struct {
 	execDiagnosticsMu sync.RWMutex
 }
 
-func NewHandler(cfg *config.Config, logger *slog.Logger, benv *redbloblang.Environment, items []protocol.CompletionItem, functionDocs map[string]protocol.MarkupContent, methodDocs map[string]protocol.MarkupContent, executor *bloblangpkg.Executor) *Handler {
-	if executor == nil {
-		executor = bloblangpkg.NewExecutor(benv, cfg)
-	}
+func NewHandler(cfg *config.Config, logger *slog.Logger) *Handler {
+	benv := bloblangpkg.NewEnvironment()
+	items, fnData, methData := bloblangpkg.BuildCompletionCache(benv)
+	fnDocs, methDocs := bloblangpkg.BuildAllDocs(fnData, methData, cfg.BloblangDocsURL)
+	executor := bloblangpkg.NewExecutor(benv, cfg)
+
 	return &Handler{
 		config:            cfg,
 		logger:            logger,
 		benv:              benv,
 		completionItems:   items,
-		functionDocs:      functionDocs,
-		methodDocs:        methodDocs,
+		functionDocs:      fnDocs,
+		methodDocs:        methDocs,
 		documents:         document.NewStore(),
 		executor:          executor,
 		cancelFuncs:       make(map[protocol.DocumentURI]context.CancelFunc),
