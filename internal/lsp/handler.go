@@ -143,6 +143,7 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	h.importBasesMu.Unlock()
 	h.updateSample(uri, doc.Text())
 	h.executor.InvalidateDocument(string(uri))
+	h.parser.InvalidateDocument(string(uri))
 	h.clearExecDiagnostics(uri)
 	h.scheduleValidation(uri)
 	h.scheduleRefresh(uri)
