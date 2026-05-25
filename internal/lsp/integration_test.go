@@ -138,15 +138,17 @@ func TestIntegrationNoSampleInlayHintsEmpty(t *testing.T) {
 func TestIntegrationTruncatedCodeLensCommand(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/truncated.blobl"
-	h.OpenDocument(uri, "#!sample {\"name\":\"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\"}\nroot = this.name")
+	h.OpenDocument(uri, `
+#!sample {"name":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}
+root = this.name`[1:])
 	lenses := h.GetCodeLenses(uri)
 	require.Len(t, lenses, 1)
 	require.NotNil(t, lenses[0].Command)
 	assert.Equal(t, "bloblang-lsp.showResult", lenses[0].Command.Command)
-	require.Len(t, lenses[0].Command.Arguments, 3)
-	var full string
-	require.NoError(t, json.Unmarshal(lenses[0].Command.Arguments[2], &full))
-	assert.Contains(t, full, "abcdefghijklmnopqrstuvwxyz")
+	require.Len(t, lenses[0].Command.Arguments, 1)
+	var full map[string]interface{}
+	require.NoError(t, json.Unmarshal(lenses[0].Command.Arguments[0], &full))
+	assert.Contains(t, full["name"].(string), "abcdefghijklmnopqrstuvwxyz")
 }
 
 func TestIntegrationRootHover(t *testing.T) {
