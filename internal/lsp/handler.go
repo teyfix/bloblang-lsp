@@ -24,6 +24,7 @@ type Handler struct {
 	config          *config.Config
 	logger          *slog.Logger
 	benv            *bloblang.Environment
+	parser          *benthos.Bloblang
 	completionItems []protocol.CompletionItem
 	functionDocs    map[string]protocol.MarkupContent
 	methodDocs      map[string]protocol.MarkupContent
@@ -56,8 +57,14 @@ type Handler struct {
 	execDiagnosticsMu sync.RWMutex
 }
 
-func NewHandler(cfg *config.Config, logger *slog.Logger) *Handler {
+func NewHandler(cfg *config.Config, logger *slog.Logger) (*Handler, error) {
 	benv := benthos.NewEnvironment()
+	parser, err := benthos.NewBloblang()
+
+	if err != nil {
+		return nil, err
+	}
+
 	items, fnData, methData := benthos.BuildCompletionCache(benv)
 	fnDocs, methDocs := benthos.BuildAllDocs(fnData, methData, cfg.BloblangDocsURL)
 	executor := benthos.NewExecutor(benv, cfg)
@@ -66,6 +73,7 @@ func NewHandler(cfg *config.Config, logger *slog.Logger) *Handler {
 		config:            cfg,
 		logger:            logger,
 		benv:              benv,
+		parser:            parser,
 		completionItems:   items,
 		functionDocs:      fnDocs,
 		methodDocs:        methDocs,
@@ -79,7 +87,7 @@ func NewHandler(cfg *config.Config, logger *slog.Logger) *Handler {
 		lensCancel:        make(map[protocol.DocumentURI]context.CancelFunc),
 		lastDiagnostics:   make(map[protocol.DocumentURI][]protocol.Diagnostic),
 		execDiagnostics:   make(map[protocol.DocumentURI][]protocol.Diagnostic),
-	}
+	}, nil
 }
 
 func (h *Handler) SetClient(client *server.Client) {

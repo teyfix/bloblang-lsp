@@ -10,6 +10,8 @@ require (
 	github.com/redpanda-data/connect/v4 v4.92.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
+	github.com/teyfix/tree-sitter-bloblang v0.1.5
+	github.com/tree-sitter/go-tree-sitter v0.25.0
 )
 
 require (
@@ -79,6 +81,7 @@ require (
 	github.com/matoous/go-nanoid/v2 v2.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/nsf/jsondiff v0.0.0-20260207060731-8e8d90c4c0ac // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
@@ -111,6 +114,7 @@ require (
 	github.com/tilinna/z85 v1.0.0 // indirect
 	github.com/timandy/routine v1.1.5 // indirect
 	github.com/tmc/langchaingo v0.1.14 // indirect
+	github.com/tree-sitter/tree-sitter-go v0.25.0 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/urfave/cli/v2 v2.27.7 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect

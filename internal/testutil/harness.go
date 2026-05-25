@@ -31,7 +31,10 @@ func NewHarness(t *testing.T) *Harness {
 		PartialExecCacheTTL:    time.Minute,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	handler := lsppkg.NewHandler(cfg, logger)
+	handler, err := lsppkg.NewHandler(cfg, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &Harness{t: t, Server: servertest.New(t, handler)}
 }
 

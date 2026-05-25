@@ -16,7 +16,12 @@ func main() {
 		log.Fatal(err)
 	}
 	logr := logger.NewLogger(cfg)
-	handler := lsp.NewHandler(cfg, logr)
+	handler, err := lsp.NewHandler(cfg, logr)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if err := lsp.NewServer(handler, logr).Run(context.Background(), server.RunStdio()); err != nil {
 		log.Fatal(err)
 	}
