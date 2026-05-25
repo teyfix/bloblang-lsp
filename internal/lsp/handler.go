@@ -15,22 +15,22 @@ import (
 	"github.com/owenrumney/go-lsp/document"
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/owenrumney/go-lsp/server"
-	redbloblang "github.com/redpanda-data/benthos/v4/public/bloblang"
-	bloblangpkg "github.com/teyfix/bloblang-lsp/internal/bloblang"
+	"github.com/redpanda-data/benthos/v4/public/bloblang"
+	"github.com/teyfix/bloblang-lsp/internal/benthos"
 	"github.com/teyfix/bloblang-lsp/internal/config"
 )
 
 type Handler struct {
 	config          *config.Config
 	logger          *slog.Logger
-	benv            *redbloblang.Environment
+	benv            *bloblang.Environment
 	completionItems []protocol.CompletionItem
 	functionDocs    map[string]protocol.MarkupContent
 	methodDocs      map[string]protocol.MarkupContent
 
 	documents *document.Store
 	client    *server.Client
-	executor  *bloblangpkg.Executor
+	executor  *benthos.Executor
 
 	mu          sync.Mutex
 	cancelFuncs map[protocol.DocumentURI]context.CancelFunc
@@ -39,7 +39,7 @@ type Handler struct {
 	importBaseDirs map[protocol.DocumentURI]string
 	importBasesMu  sync.RWMutex
 
-	samples   map[protocol.DocumentURI]*bloblangpkg.Sample
+	samples   map[protocol.DocumentURI]*benthos.Sample
 	samplesMu sync.RWMutex
 
 	sampleDiagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
@@ -57,10 +57,10 @@ type Handler struct {
 }
 
 func NewHandler(cfg *config.Config, logger *slog.Logger) *Handler {
-	benv := bloblangpkg.NewEnvironment()
-	items, fnData, methData := bloblangpkg.BuildCompletionCache(benv)
-	fnDocs, methDocs := bloblangpkg.BuildAllDocs(fnData, methData, cfg.BloblangDocsURL)
-	executor := bloblangpkg.NewExecutor(benv, cfg)
+	benv := benthos.NewEnvironment()
+	items, fnData, methData := benthos.BuildCompletionCache(benv)
+	fnDocs, methDocs := benthos.BuildAllDocs(fnData, methData, cfg.BloblangDocsURL)
+	executor := benthos.NewExecutor(benv, cfg)
 
 	return &Handler{
 		config:            cfg,
@@ -73,7 +73,7 @@ func NewHandler(cfg *config.Config, logger *slog.Logger) *Handler {
 		executor:          executor,
 		cancelFuncs:       make(map[protocol.DocumentURI]context.CancelFunc),
 		importBaseDirs:    make(map[protocol.DocumentURI]string),
-		samples:           make(map[protocol.DocumentURI]*bloblangpkg.Sample),
+		samples:           make(map[protocol.DocumentURI]*benthos.Sample),
 		sampleDiagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic),
 		inlayCancel:       make(map[protocol.DocumentURI]context.CancelFunc),
 		lensCancel:        make(map[protocol.DocumentURI]context.CancelFunc),
@@ -308,7 +308,7 @@ func (h *Handler) baseDirForURI(uri protocol.DocumentURI) string {
 }
 
 func (h *Handler) updateSample(uri protocol.DocumentURI, text string) {
-	sample, err := bloblangpkg.ExtractSample(text, h.baseDirForURI(uri))
+	sample, err := benthos.ExtractSample(text, h.baseDirForURI(uri))
 	h.samplesMu.Lock()
 	h.samples[uri] = sample
 	h.samplesMu.Unlock()
@@ -329,7 +329,7 @@ func (h *Handler) updateSample(uri protocol.DocumentURI, text string) {
 	}}
 }
 
-func (h *Handler) getSample(uri protocol.DocumentURI) *bloblangpkg.Sample {
+func (h *Handler) getSample(uri protocol.DocumentURI) *benthos.Sample {
 	h.samplesMu.RLock()
 	defer h.samplesMu.RUnlock()
 	return h.samples[uri]

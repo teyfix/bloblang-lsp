@@ -8,7 +8,7 @@ import (
 	"time"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
-	bloblangpkg "github.com/teyfix/bloblang-lsp/internal/bloblang"
+	"github.com/teyfix/bloblang-lsp/internal/benthos"
 )
 
 func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
@@ -30,7 +30,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 			continue
 		}
 		// Compute the last line of this (possibly multi-line) statement.
-		lastLine := bloblangpkg.StatementEnd(lines, lineIdx) - 1
+		lastLine := benthos.StatementEnd(lines, lineIdx) - 1
 		result, err := h.executor.ExecuteCumulative(string(uri), sample.Value, text, lineIdx)
 		if err != nil {
 			execErrs = append(execErrs, protocol.Diagnostic{

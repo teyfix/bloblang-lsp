@@ -1,4 +1,4 @@
-package bloblang
+package benthos
 
 import (
 	"os"
