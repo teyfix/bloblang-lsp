@@ -8,9 +8,14 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
+type parsedTree struct {
+	tree *tree_sitter.Tree
+	text string
+}
+
 type Bloblang struct {
 	parser *tree_sitter.Parser
-	trees  map[string]*tree_sitter.Tree
+	trees  map[string]*parsedTree
 	mu     sync.Mutex
 }
 
@@ -24,7 +29,7 @@ func NewBloblang() (*Bloblang, error) {
 
 	return &Bloblang{
 		parser: parser,
-		trees:  make(map[string]*tree_sitter.Tree), // initialize the map
+		trees:  make(map[string]*parsedTree), // initialize the map
 	}, nil
 }
 
@@ -90,17 +95,28 @@ func (b *Bloblang) Parse(uri string, document string) (*tree_sitter.Tree, error)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tree := b.parser.Parse([]byte(document), b.trees[uri])
+	if cached, ok := b.trees[uri]; ok && cached.text == document {
+		return cached.tree, nil
+	}
+
+	var oldTree *tree_sitter.Tree
+	if cached, ok := b.trees[uri]; ok {
+		oldTree = cached.tree
+	}
+
+	tree := b.parser.Parse([]byte(document), oldTree)
 	if tree == nil {
 		return nil, fmt.Errorf("could not parse document: tree is nil")
 	}
 
-	if old := b.trees[uri]; old != nil {
-		// free the C-allocated old tree before replacing
-		old.Close()
+	if oldTree != nil {
+		oldTree.Close()
 	}
 
-	b.trees[uri] = tree
+	b.trees[uri] = &parsedTree{
+		tree: tree,
+		text: document,
+	}
 	return tree, nil
 }
 
@@ -108,10 +124,12 @@ func (b *Bloblang) InvalidateDocument(uri string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if tree := b.trees[uri]; tree != nil {
-		tree.Close()
+	if cached, ok := b.trees[uri]; ok {
+		if cached.tree != nil {
+			cached.tree.Close()
+		}
+		delete(b.trees, uri)
 	}
-	delete(b.trees, uri)
 }
 
 // Close frees all retained trees. Call when the Bloblang instance is no longer needed.
@@ -119,8 +137,10 @@ func (b *Bloblang) Close(uri string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for uri, tree := range b.trees {
-		tree.Close()
-		delete(b.trees, uri)
+	for k, cached := range b.trees {
+		if cached.tree != nil {
+			cached.tree.Close()
+		}
+		delete(b.trees, k)
 	}
 }
