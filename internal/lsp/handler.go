@@ -143,7 +143,6 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	h.importBasesMu.Unlock()
 	h.updateSample(uri, doc.Text())
 	h.executor.InvalidateDocument(string(uri))
-	h.parser.InvalidateDocument(string(uri))
 	h.clearExecDiagnostics(uri)
 	h.scheduleValidation(uri)
 	h.scheduleRefresh(uri)
@@ -238,7 +237,7 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 				Value: "Provide a sample with `#!sample {\"key\": \"value\"}`",
 			}}, nil
 		}
-		result, err := h.executor.ExecuteCumulative(string(uri), sample.Value, text, lineIdx)
+		result, err := h.executor.ExecuteCumulative(h.parser, string(uri), sample.Value, text, lineIdx)
 		if err != nil || result == nil {
 			return nil, nil
 		}

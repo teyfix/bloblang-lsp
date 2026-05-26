@@ -2,8 +2,6 @@ package benthos
 
 import (
 	"encoding/json"
-	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,10 +11,6 @@ import (
 	"github.com/teyfix/bloblang-lsp/internal/config"
 	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
 )
-
-// rootAssignLineRe matches any line that starts a root assignment (simple, dot, or bracket path).
-// This mirrors the lsp.rootAssignRe pattern but lives here to avoid an import cycle.
-var rootAssignLineRe = regexp.MustCompile(`^\s*root[\s.\[].*=`)
 
 type PartialResult struct {
 	Text      string
@@ -51,7 +45,7 @@ func NewExecutor(benv *bloblang.Environment, cfg *config.Config) *Executor {
 // This is used by code lenses (pass throughLine = lineIdx-1 to show the input state
 // before the line) and inlay hints (pass throughLine = lineIdx to show the output
 // state after the line).
-func (e *Executor) ExecuteCumulative(uri string, sample interface{}, docText string, throughLine int) (*PartialResult, error) {
+func (e *Executor) ExecuteCumulative(parser *Bloblang, uri string, sample interface{}, docText string, throughLine int) (*PartialResult, error) {
 	if len(docText) > e.config.MaxInlineDocumentBytes {
 		return nil, nil
 	}
@@ -85,34 +79,30 @@ func (e *Executor) ExecuteCumulative(uri string, sample interface{}, docText str
 		return result, nil
 	}
 
-	lines := strings.Split(docText, "\n")
-	if throughLine >= len(lines) {
-		return nil, fmt.Errorf("through line out of range")
+	tree, err := parser.Parse(uri, docText)
+	if err != nil {
+		return nil, err
 	}
 
-	// Collect all root-assignment statement blocks from line 0 through throughLine.
-	// "through throughLine" means: include all statements whose START line is <= throughLine.
-	// Each statement is allowed to extend beyond throughLine via its continuation lines.
-	var snippetLines []string
-	i := 0
-	for i <= throughLine {
-		line := lines[i]
-		if rootAssignLineRe.MatchString(line) {
-			// Include this line and all its continuation lines (no clamping).
-			end := StatementEnd(lines, i)
-			snippetLines = append(snippetLines, lines[i:end]...)
-			i = end
-		} else {
-			i++
+	// Collect all root-assignment nodes whose start row is <= throughLine.
+	root := tree.RootNode()
+	var snippetParts []string
+	for i := uint(0); i < root.ChildCount(); i++ {
+		child := root.Child(i)
+		if child.Kind() != "root_assignment" {
+			continue
+		}
+		if int(child.StartPosition().Row) <= throughLine {
+			snippetParts = append(snippetParts, child.Utf8Text([]byte(docText)))
 		}
 	}
 
-	if len(snippetLines) == 0 {
+	if len(snippetParts) == 0 {
 		// No root assignments up to throughLine — return raw sample.
-		return e.ExecuteCumulative(uri, sample, docText, -1)
+		return e.ExecuteCumulative(parser, uri, sample, docText, -1)
 	}
 
-	snippet := strings.Join(snippetLines, "\n")
+	snippet := strings.Join(snippetParts, "\n")
 	parsed, err := e.benv.Parse(snippet)
 	if err != nil {
 		return nil, err
@@ -153,21 +143,6 @@ func (e *Executor) InvalidateDocument(uri string) {
 			e.cache.Remove(key)
 		}
 	}
-}
-
-func StatementEnd(lines []string, rootLine int) int {
-	end := rootLine + 1
-	for end < len(lines) {
-		line := lines[end]
-		if strings.TrimSpace(line) == "" {
-			break
-		}
-		if strings.HasPrefix(line, "root") || strings.HasPrefix(line, "let") {
-			break
-		}
-		end++
-	}
-	return end
 }
 
 func looksIncomplete(err error) bool {

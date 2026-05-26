@@ -1,7 +1,6 @@
 package benthos
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -19,43 +18,54 @@ func testExecutorConfig() *config.Config {
 	}
 }
 
+func newTestParser(t *testing.T) *Bloblang {
+	t.Helper()
+	p, err := NewBloblang()
+	require.NoError(t, err)
+	t.Cleanup(func() { p.Close("test") })
+	return p
+}
+
 func TestExecuteCumulativeSingleLine(t *testing.T) {
+	parser := newTestParser(t)
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	doc := "#!sample {\"name\":\"alice\",\"age\":30}\nroot.name = this.name"
 	sample := map[string]interface{}{"name": "alice", "age": 30}
 
-	// through line 1 (the only root assignment) → {"name":"alice"}
-	result, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, 1)
+	// through line 1 (the only root assignment) → {\"name\":\"alice\"}
+	result, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, `{"name":"alice"}`, result.Text)
 }
 
 func TestExecuteCumulativeMultiAssignment(t *testing.T) {
+	parser := newTestParser(t)
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	doc := "#!sample {}\nroot.name = this.name\nroot.age = this.age"
 	sample := map[string]interface{}{"name": "alice", "age": 30}
 
 	// through line 1 (first assignment) → only name field
-	result1, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, 1)
+	result1, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 	assert.Equal(t, `{"name":"alice"}`, result1.Text)
 
 	// through line 2 (both assignments) → both fields
-	result2, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, 2)
+	result2, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, 2)
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 	assert.Equal(t, `{"age":30,"name":"alice"}`, result2.Text)
 }
 
 func TestExecuteCumulativeBeforeFirstLine(t *testing.T) {
+	parser := newTestParser(t)
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	doc := "#!sample {}\nroot.name = this.name\nroot.age = this.age"
 	sample := map[string]interface{}{"name": "alice", "age": 30}
 
 	// throughLine = -1 means "before any assignment" → raw sample
-	result, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, -1)
+	result, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, -1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	// raw sample marshalled
@@ -63,89 +73,51 @@ func TestExecuteCumulativeBeforeFirstLine(t *testing.T) {
 }
 
 func TestExecuteCumulativeInvalidatesCache(t *testing.T) {
+	parser := newTestParser(t)
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	uri := "file:///map.blobl"
 	doc := "#!sample {}\nroot.name = this.name"
 	sample := map[string]interface{}{"name": "alice"}
 
-	result, err := executor.ExecuteCumulative(uri, sample, doc, 1)
+	result, err := executor.ExecuteCumulative(parser, uri, sample, doc, 1)
 	require.NoError(t, err)
 	require.Equal(t, `{"name":"alice"}`, result.Text)
 
 	executor.InvalidateDocument(uri)
-	result, err = executor.ExecuteCumulative(uri, map[string]interface{}{"name": "bob"}, doc, 1)
+	result, err = executor.ExecuteCumulative(parser, uri, map[string]interface{}{"name": "bob"}, doc, 1)
 	require.NoError(t, err)
 	require.Equal(t, `{"name":"bob"}`, result.Text)
 }
 
-func TestStatementEnd(t *testing.T) {
-	tests := []struct {
-		name     string
-		doc      string
-		rootLine int
-		wantEnd  int
-	}{
-		{
-			name:     "single line statement",
-			doc:      "root = this.name",
-			rootLine: 0,
-			wantEnd:  1,
-		},
-		{
-			name:     "multiline statement ends at blank line",
-			doc:      "root.msg = root.\n  message.\n  replace(\"hello\", \"world\")\n\nroot.other = this",
-			rootLine: 0,
-			wantEnd:  3,
-		},
-		{
-			name:     "multiline statement ends at next root",
-			doc:      "root.msg = root.\n  message.\n  replace(\"hello\", \"world\")\nroot.other = this",
-			rootLine: 0,
-			wantEnd:  3,
-		},
-		{
-			name:     "second statement in doc",
-			doc:      "root.first = this.a\nroot.second = this.\n  b",
-			rootLine: 1,
-			wantEnd:  3,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			lines := strings.Split(tt.doc, "\n")
-			got := StatementEnd(lines, tt.rootLine)
-			assert.Equal(t, tt.wantEnd, got)
-		})
-	}
-}
-
 func TestExecuteCumulativeMultilineStatement(t *testing.T) {
+	parser := newTestParser(t)
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	// Multi-line assignment: root.msg spans lines 1-3
 	doc := "#!sample {\"message\":\"hello world\"}\nroot.msg = this.\n  message.\n  replace(\"hello\", \"good morning\")"
 	sample := map[string]interface{}{"message": "hello world"}
 
 	// throughLine=1 (start of the multi-line statement) should include all continuation lines
-	result, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, 1)
+	result, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	assert.Equal(t, `{"msg":"good morning world"}`, result.Text)
 }
 
 func TestExecuteCumulativeMultilineMultiStatement(t *testing.T) {
+	parser := newTestParser(t)
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
 	// Two multi-line assignments
 	doc := "#!sample {\"message\":\"hello world\"}\nroot.msg = this.\n  message.\n  replace(\"hello\", \"good morning\")\nroot.upper = this.\n  message.\n  uppercase()"
 	sample := map[string]interface{}{"message": "hello world"}
 
 	// throughLine=1 → only first statement
-	result1, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, 1)
+	result1, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, 1)
 	require.NoError(t, err)
 	require.NotNil(t, result1)
 	assert.Equal(t, `{"msg":"good morning world"}`, result1.Text)
 
 	// throughLine=4 → both statements
-	result2, err := executor.ExecuteCumulative("file:///map.blobl", sample, doc, 4)
+	result2, err := executor.ExecuteCumulative(parser, "file:///map.blobl", sample, doc, 4)
 	require.NoError(t, err)
 	require.NotNil(t, result2)
 	assert.Equal(t, `{"msg":"good morning world","upper":"HELLO WORLD"}`, result2.Text)

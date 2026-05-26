@@ -28,7 +28,7 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 		if !rootAssignRe.MatchString(line) {
 			continue
 		}
-		result, err := h.executor.ExecuteCumulative(string(uri), sample.Value, text, lineIdx-1)
+		result, err := h.executor.ExecuteCumulative(h.parser, string(uri), sample.Value, text, lineIdx-1)
 		if err != nil {
 			execErrs = append(execErrs, protocol.Diagnostic{
 				Range: protocol.Range{
