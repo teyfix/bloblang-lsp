@@ -115,7 +115,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 				},
 				Severity: &severity,
 				Source:   "bloblang",
-				Message:  errAfter.Error(),
+				Message:  indentMessage(errAfter.Error()),
 			})
 			continue
 		}

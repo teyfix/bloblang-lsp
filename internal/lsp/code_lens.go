@@ -104,7 +104,7 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 				},
 				Severity: &severity,
 				Source:   "bloblang",
-				Message:  errAfter.Error(),
+				Message:  indentMessage(errAfter.Error()),
 			})
 			continue
 		}

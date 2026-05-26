@@ -91,6 +91,22 @@ func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI
 	}
 }
 
+func indentMessage(msg string) string {
+	// Clean up newlines first to get the raw single line format
+	msg = strings.Split(msg, "\n")[0]
+	parts := strings.Split(msg, ": ")
+	var indentParts []string
+	for i, part := range parts {
+		indent := strings.Repeat("  ", i)
+		if i < len(parts)-1 {
+			indentParts = append(indentParts, indent+part+":")
+		} else {
+			indentParts = append(indentParts, indent+part)
+		}
+	}
+	return strings.Join(indentParts, "\n")
+}
+
 func convertErrorToDiagnostics(_ string, err error) []protocol.Diagnostic {
 	severity := protocol.SeverityError
 	source := "bloblang"
