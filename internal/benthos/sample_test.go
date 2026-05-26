@@ -10,38 +10,60 @@ import (
 )
 
 func TestExtractSampleInline(t *testing.T) {
-	sample, err := ExtractSample("#!sample {\"key\":\"val\"}\nroot = this.key", t.TempDir())
+	parser, err := NewBloblang()
+	require.NoError(t, err)
+	defer parser.Close("test")
+
+	sample, err := ExtractSample(parser, "file:///map.blobl", "#!sample {\"key\":\"val\"}\nroot = this.key", t.TempDir())
 	require.NoError(t, err)
 	require.NotNil(t, sample)
 	assert.Equal(t, "inline", sample.Source)
 	assert.Equal(t, map[string]interface{}{"key": "val"}, sample.Value)
+	assert.Equal(t, 0, sample.Line)
 }
 
 func TestExtractSampleFromFile(t *testing.T) {
+	parser, err := NewBloblang()
+	require.NoError(t, err)
+	defer parser.Close("test")
+
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "data.json"), []byte(`{"name":"alice"}`), 0o600))
 
-	sample, err := ExtractSample("#!sample_from data.json\nroot = this.name", dir)
+	sample, err := ExtractSample(parser, "file:///map.blobl", "#!sample_from data.json\nroot = this.name", dir)
 	require.NoError(t, err)
 	require.NotNil(t, sample)
 	assert.Equal(t, map[string]interface{}{"name": "alice"}, sample.Value)
 	assert.Equal(t, filepath.Join(dir, "data.json"), sample.Source)
+	assert.Equal(t, 0, sample.Line)
 }
 
 func TestExtractSampleAfterMappingIgnored(t *testing.T) {
-	sample, err := ExtractSample("root = this\n#!sample {\"key\":\"val\"}", t.TempDir())
+	parser, err := NewBloblang()
+	require.NoError(t, err)
+	defer parser.Close("test")
+
+	sample, err := ExtractSample(parser, "file:///map.blobl", "root = this\n#!sample {\"key\":\"val\"}", t.TempDir())
 	require.NoError(t, err)
 	assert.Nil(t, sample)
 }
 
 func TestExtractSampleMalformedJSON(t *testing.T) {
-	sample, err := ExtractSample("#!sample {", t.TempDir())
+	parser, err := NewBloblang()
+	require.NoError(t, err)
+	defer parser.Close("test")
+
+	sample, err := ExtractSample(parser, "file:///map.blobl", "#!sample {", t.TempDir())
 	assert.Error(t, err)
 	assert.Nil(t, sample)
 }
 
 func TestExtractSampleMissingDirective(t *testing.T) {
-	sample, err := ExtractSample("# normal comment\n\nroot = this", t.TempDir())
+	parser, err := NewBloblang()
+	require.NoError(t, err)
+	defer parser.Close("test")
+
+	sample, err := ExtractSample(parser, "file:///map.blobl", "# normal comment\n\nroot = this", t.TempDir())
 	require.NoError(t, err)
 	assert.Nil(t, sample)
 }

@@ -317,7 +317,7 @@ func (h *Handler) baseDirForURI(uri protocol.DocumentURI) string {
 }
 
 func (h *Handler) updateSample(uri protocol.DocumentURI, text string) {
-	sample, err := benthos.ExtractSample(text, h.baseDirForURI(uri))
+	sample, err := benthos.ExtractSample(h.parser, string(uri), text, h.baseDirForURI(uri))
 	h.samplesMu.Lock()
 	h.samples[uri] = sample
 	h.samplesMu.Unlock()

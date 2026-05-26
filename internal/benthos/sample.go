@@ -1,7 +1,6 @@
 package benthos
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,28 +11,39 @@ import (
 type Sample struct {
 	Value  interface{}
 	Source string
+	Line   int
 }
 
-func ExtractSample(text string, baseDir string) (*Sample, error) {
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if !strings.HasPrefix(line, "#") {
+func ExtractSample(parser *Bloblang, uri string, text string, baseDir string) (*Sample, error) {
+	tree, err := parser.Parse(uri, text)
+	if err != nil {
+		return nil, err
+	}
+	root := tree.RootNode()
+	for i := uint(0); i < root.ChildCount(); i++ {
+		child := root.Child(i)
+		if child.Kind() != "comment" {
+			// A non-comment statement node is encountered. Any sample directives must be placed before statements.
 			return nil, nil
 		}
+
+		commentText := child.Utf8Text([]byte(text))
+		lineText := strings.TrimSpace(commentText)
+
 		switch {
-		case strings.HasPrefix(line, "#!sample "):
-			raw := strings.TrimSpace(strings.TrimPrefix(line, "#!sample "))
+		case strings.HasPrefix(lineText, "#!sample "):
+			raw := strings.TrimSpace(strings.TrimPrefix(lineText, "#!sample "))
 			var value interface{}
 			if err := json.Unmarshal([]byte(raw), &value); err != nil {
 				return nil, err
 			}
-			return &Sample{Value: value, Source: "inline"}, nil
-		case strings.HasPrefix(line, "#!sample_from "):
-			rel := strings.TrimSpace(strings.TrimPrefix(line, "#!sample_from "))
+			return &Sample{
+				Value:  value,
+				Source: "inline",
+				Line:   int(child.StartPosition().Row),
+			}, nil
+		case strings.HasPrefix(lineText, "#!sample_from "):
+			rel := strings.TrimSpace(strings.TrimPrefix(lineText, "#!sample_from "))
 			if rel == "" {
 				return nil, fmt.Errorf("missing sample file path")
 			}
@@ -50,11 +60,12 @@ func ExtractSample(text string, baseDir string) (*Sample, error) {
 			if err != nil {
 				abs = source
 			}
-			return &Sample{Value: value, Source: abs}, nil
+			return &Sample{
+				Value:  value,
+				Source: abs,
+				Line:   int(child.StartPosition().Row),
+			}, nil
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
 	}
 	return nil, nil
 }
