@@ -18,6 +18,7 @@ import (
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
 	"github.com/teyfix/bloblang-lsp/internal/benthos"
 	"github.com/teyfix/bloblang-lsp/internal/config"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 type Handler struct {
@@ -210,26 +211,27 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 	if !ok {
 		return nil, nil
 	}
-	lines := strings.Split(text, "\n")
 	lineIdx := params.Position.Line
-	if lineIdx < 0 || lineIdx >= len(lines) {
-		return nil, nil
-	}
-	line := lines[lineIdx]
 	col := params.Position.Character
-	if col > len(line) {
-		col = len(line)
-	}
 
-	token, tokenStart, tokenEnd, isMethod := findTokenAtPosition(lines, lineIdx, col)
-	if token == "" {
+	tree, parseErr := h.parser.Parse(string(uri), text)
+	if parseErr != nil || tree == nil {
 		return nil, nil
 	}
 
-	if token == "root" {
-		if !rootAssignRe.MatchString(line) {
-			return nil, nil
-		}
+	root := tree.RootNode()
+	point := tree_sitter.Point{
+		Row:    uint(lineIdx),
+		Column: uint(col),
+	}
+
+	node := root.DescendantForPointRange(point, point)
+	if node == nil {
+		return nil, nil
+	}
+
+	// 1. Root assignment hover (at the "root" keyword in root_assignment)
+	if node.Kind() == "root" && node.Parent() != nil && node.Parent().Kind() == "root_assignment" {
 		sample := h.getSample(uri)
 		if sample == nil {
 			return &protocol.Hover{Contents: protocol.MarkupContent{
@@ -241,32 +243,41 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 		if err != nil || result == nil {
 			return nil, nil
 		}
-		return &protocol.Hover{Contents: protocol.MarkupContent{
-			Kind:  protocol.Markdown,
-			Value: fmt.Sprintf("```json\n%s\n```", result.Full),
-		}}, nil
+		return &protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind:  protocol.Markdown,
+				Value: fmt.Sprintf("```json\n%s\n```", result.Full),
+			},
+			Range: &protocol.Range{
+				Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
+				End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
+			},
+		}, nil
 	}
 
-	if !isFunctionCallContext(line, tokenEnd) {
-		return nil, nil
+	// 2. Functions & Methods hover
+	if node.Kind() == "identifier" && node.Parent() != nil {
+		parent := node.Parent()
+		token := node.Utf8Text([]byte(text))
+		var doc protocol.MarkupContent
+		var found bool
+		if parent.Kind() == "method_call" {
+			doc, found = h.methodDocs[token]
+		} else if parent.Kind() == "call_expr" {
+			doc, found = h.functionDocs[token]
+		}
+		if found {
+			return &protocol.Hover{
+				Contents: doc,
+				Range: &protocol.Range{
+					Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
+					End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
+				},
+			}, nil
+		}
 	}
-	var doc protocol.MarkupContent
-	var found bool
-	if isMethod {
-		doc, found = h.methodDocs[token]
-	} else {
-		doc, found = h.functionDocs[token]
-	}
-	if !found {
-		return nil, nil
-	}
-	return &protocol.Hover{
-		Contents: doc,
-		Range: &protocol.Range{
-			Start: protocol.Position{Line: lineIdx, Character: tokenStart},
-			End:   protocol.Position{Line: lineIdx, Character: tokenEnd},
-		},
-	}, nil
+
+	return nil, nil
 }
 
 func (h *Handler) scheduleValidation(uri protocol.DocumentURI) {

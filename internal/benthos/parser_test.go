@@ -146,3 +146,57 @@ func TestBloblangParserEdit(t *testing.T) {
 	}
 	tree1.Edit(&edit)
 }
+
+func TestBloblangParserDescendant(t *testing.T) {
+	b, err := NewBloblang()
+	require.NoError(t, err)
+	defer b.Close("explore")
+
+	uri := "file:///test-desc.blobl"
+	doc := `root = json("name")`
+	tree, err := b.Parse(uri, doc)
+	require.NoError(t, err)
+	require.NotNil(t, tree)
+
+	root := tree.RootNode()
+	point := tree_sitter.Point{Row: 0, Column: 8} // 'j' of json
+	node1 := root.DescendantForPointRange(point, point)
+	require.NotNil(t, node1)
+	assert.Equal(t, "identifier", node1.Kind())
+
+	node2 := root.NamedDescendantForPointRange(point, point)
+	require.NotNil(t, node2)
+	assert.Equal(t, "identifier", node2.Kind())
+}
+
+func TestBloblangParserHover(t *testing.T) {
+	b, err := NewBloblang()
+	require.NoError(t, err)
+	defer b.Close("explore")
+
+	// 1. Function test
+	uri1 := "file:///test-fn.blobl"
+	doc1 := `root = json("name")`
+	tree1, err := b.Parse(uri1, doc1)
+	require.NoError(t, err)
+	root1 := tree1.RootNode()
+	point1 := tree_sitter.Point{Row: 0, Column: 8} // 'j' of json
+	node1 := root1.DescendantForPointRange(point1, point1)
+	t.Logf("Function node: kind=%s, text=%s", node1.Kind(), node1.Utf8Text([]byte(doc1)))
+	if node1.Parent() != nil {
+		t.Logf("  Parent: kind=%s", node1.Parent().Kind())
+	}
+
+	// 2. Method test
+	uri2 := "file:///test-method.blobl"
+	doc2 := `root = this.string()`
+	tree2, err := b.Parse(uri2, doc2)
+	require.NoError(t, err)
+	root2 := tree2.RootNode()
+	point2 := tree_sitter.Point{Row: 0, Column: 14} // 's' of string
+	node2 := root2.DescendantForPointRange(point2, point2)
+	t.Logf("Method node: kind=%s, text=%s", node2.Kind(), node2.Utf8Text([]byte(doc2)))
+	if node2.Parent() != nil {
+		t.Logf("  Parent: kind=%s", node2.Parent().Kind())
+	}
+}
