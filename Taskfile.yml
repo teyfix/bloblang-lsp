@@ -1,6 +1,7 @@
 version: 3
 
 vars:
+  CGO_ENABLED: 1
   TARGET_DIR: target
   VERSION:
     sh: test -n "${VERSION}" && echo "${VERSION}"
@@ -12,7 +13,7 @@ tasks:
   build:
     desc: Build language server
     env:
-      CGO_ENABLED: 0
+      CGO_ENABLED: "{{.CGO_ENABLED}}"
     vars:
       COMPRESS: '{{ default true .COMPRESS }}'
     deps:
@@ -26,7 +27,7 @@ tasks:
   build:target:
     desc: Build language server for a specific OS and architecture
     env:
-      CGO_ENABLED: 0
+      CGO_ENABLED: "{{.CGO_ENABLED}}"
     preconditions:
       - sh: test -n "{{.OS}}"
         msg: Required build variable OS is not set
