@@ -64,20 +64,22 @@ func TestIntegrationDiagnostics(t *testing.T) {
 	assert.Empty(t, diags)
 }
 
-func TestIntegrationDebounceCorrectness(t *testing.T) {
+func TestIntegrationImmediateDiagnostics(t *testing.T) {
 	h := testutil.NewHarness(t)
-	uri := "file:///tmp/debounce.blobl"
-	h.OpenDocument(uri, "root = \"ok\"")
-	_ = h.WaitForDiagnostics(uri, time.Second)
-	h.Server.ClearDiagnostics()
+	uri := "file:///tmp/immediate.blobl"
+	h.OpenDocument(uri, "root = (")
 
-	for i := 0; i < 10; i++ {
-		h.ChangeDocument(uri, "root = \"ok\"")
-	}
-	time.Sleep(100 * time.Millisecond)
-	published := h.Server.AllDiagnostics()
-	require.Len(t, published, 1)
-	assert.Equal(t, protocol.DocumentURI(uri), published[0].URI)
+	// Wait for transport delivery
+	diags := h.WaitForDiagnostics(uri, time.Second)
+	require.NotEmpty(t, diags)
+	assert.Equal(t, protocol.SeverityError, *diags[0].Severity)
+
+	h.Server.ClearDiagnostics()
+	h.ChangeDocument(uri, "root = \"ok\"")
+
+	// Wait for diagnostics to be cleared
+	diags = h.WaitForDiagnostics(uri, time.Second)
+	assert.Empty(t, diags)
 }
 
 func TestIntegrationCloseClearsDiagnostics(t *testing.T) {

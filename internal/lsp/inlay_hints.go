@@ -140,47 +140,12 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 }
 
 func (h *Handler) scheduleRefresh(uri protocol.DocumentURI) {
-	h.inlayLensMu.Lock()
-	if cancel, ok := h.inlayCancel[uri]; ok {
-		cancel()
-	}
-	if cancel, ok := h.lensCancel[uri]; ok {
-		cancel()
-	}
-	inlayCtx, inlayCancel := context.WithCancel(context.Background())
-	lensCtx, lensCancel := context.WithCancel(context.Background())
-	h.inlayCancel[uri] = inlayCancel
-	h.lensCancel[uri] = lensCancel
-	h.inlayLensMu.Unlock()
-
-	go h.refreshAfter(inlayCtx, true)
-	go h.refreshAfter(lensCtx, false)
-}
-
-func (h *Handler) refreshAfter(ctx context.Context, inlay bool) {
-	select {
-	case <-time.After(h.config.InlineResultDebounce):
-		if h.client == nil || ctx.Err() != nil {
-			return
-		}
-		if inlay {
+	if h.client != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
 			_ = h.client.InlayHintRefresh(ctx)
-		} else {
 			_ = h.client.CodeLensRefresh(ctx)
-		}
-	case <-ctx.Done():
-	}
-}
-
-func (h *Handler) cancelRefresh(uri protocol.DocumentURI) {
-	h.inlayLensMu.Lock()
-	defer h.inlayLensMu.Unlock()
-	if cancel, ok := h.inlayCancel[uri]; ok {
-		cancel()
-		delete(h.inlayCancel, uri)
-	}
-	if cancel, ok := h.lensCancel[uri]; ok {
-		cancel()
-		delete(h.lensCancel, uri)
+		}()
 	}
 }

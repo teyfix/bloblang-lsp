@@ -13,7 +13,7 @@ import (
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
-func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI) {
+func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI, version uint64) {
 	text, ok := h.documents.Text(uri)
 	if !ok {
 		return
@@ -72,9 +72,6 @@ func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI
 				return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name))
 			})
 			_, err := env.Parse(text)
-			if ctx.Err() != nil {
-				return
-			}
 			if err != nil {
 				diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)
 			}
@@ -82,9 +79,14 @@ func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI
 	}
 
 	diagnostics = append(diagnostics, h.importHintDiagnostics(uri, text)...)
-	if ctx.Err() != nil {
-		return
+
+	h.mu.Lock()
+	currentVersion, ok := h.latestVersion[uri]
+	h.mu.Unlock()
+	if !ok || version != currentVersion {
+		return // Stale validation run or document was closed!
 	}
+
 	h.publishDiagnostics(ctx, uri, diagnostics)
 	if h.validationHook != nil {
 		h.validationHook(uri, diagnostics)

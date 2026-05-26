@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/owenrumney/go-lsp/document"
 	protocol "github.com/owenrumney/go-lsp/lsp"
@@ -34,7 +33,6 @@ type Handler struct {
 	executor  *benthos.Executor
 
 	mu          sync.Mutex
-	cancelFuncs map[protocol.DocumentURI]context.CancelFunc
 
 	workspaceRoot  string
 	importBaseDirs map[protocol.DocumentURI]string
@@ -46,15 +44,14 @@ type Handler struct {
 	sampleDiagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	sampleDiagnosticsMu sync.RWMutex
 
-	inlayCancel       map[protocol.DocumentURI]context.CancelFunc
-	lensCancel        map[protocol.DocumentURI]context.CancelFunc
-	inlayLensMu       sync.Mutex
 	lastDiagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	lastDiagnosticsMu sync.RWMutex
 	validationHook    func(protocol.DocumentURI, []protocol.Diagnostic)
 
 	execDiagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	execDiagnosticsMu sync.RWMutex
+
+	latestVersion map[protocol.DocumentURI]uint64
 }
 
 func NewHandler(cfg *config.Config, logger *slog.Logger) (*Handler, error) {
@@ -79,14 +76,12 @@ func NewHandler(cfg *config.Config, logger *slog.Logger) (*Handler, error) {
 		methodDocs:        methDocs,
 		documents:         document.NewStore(),
 		executor:          executor,
-		cancelFuncs:       make(map[protocol.DocumentURI]context.CancelFunc),
 		importBaseDirs:    make(map[protocol.DocumentURI]string),
 		samples:           make(map[protocol.DocumentURI]*benthos.Sample),
 		sampleDiagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic),
-		inlayCancel:       make(map[protocol.DocumentURI]context.CancelFunc),
-		lensCancel:        make(map[protocol.DocumentURI]context.CancelFunc),
 		lastDiagnostics:   make(map[protocol.DocumentURI][]protocol.Diagnostic),
 		execDiagnostics:   make(map[protocol.DocumentURI][]protocol.Diagnostic),
+		latestVersion:     make(map[protocol.DocumentURI]uint64),
 	}, nil
 }
 
@@ -144,11 +139,16 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	h.updateSample(uri, doc.Text())
 	h.executor.InvalidateDocument(string(uri))
 	h.clearExecDiagnostics(uri)
-	h.scheduleValidation(uri)
-	h.scheduleRefresh(uri)
-	if h.config.DiagnosticsDebounce == 0 {
-		h.validateDocument(ctx, uri)
-	}
+
+	h.mu.Lock()
+	h.latestVersion[uri]++
+	ver := h.latestVersion[uri]
+	h.mu.Unlock()
+
+	go func(v uint64) {
+		h.validateDocument(context.Background(), uri, v)
+		h.scheduleRefresh(uri)
+	}(ver)
 	return nil
 }
 
@@ -161,19 +161,22 @@ func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextD
 	h.updateSample(uri, doc.Text())
 	h.executor.InvalidateDocument(string(uri))
 	h.clearExecDiagnostics(uri)
-	h.scheduleValidation(uri)
-	h.scheduleRefresh(uri)
-	if h.config.DiagnosticsDebounce == 0 {
-		h.validateDocument(ctx, uri)
-	}
+
+	h.mu.Lock()
+	h.latestVersion[uri]++
+	ver := h.latestVersion[uri]
+	h.mu.Unlock()
+
+	go func(v uint64) {
+		h.validateDocument(context.Background(), uri, v)
+		h.scheduleRefresh(uri)
+	}(ver)
 	return nil
 }
 
 func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := params.TextDocument.URI
 	h.documents.Close(params)
-	h.cancelValidation(uri)
-	h.cancelRefresh(uri)
 	h.importBasesMu.Lock()
 	delete(h.importBaseDirs, uri)
 	h.importBasesMu.Unlock()
@@ -184,6 +187,12 @@ func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDoc
 	delete(h.sampleDiagnostics, uri)
 	h.sampleDiagnosticsMu.Unlock()
 	h.executor.InvalidateDocument(string(uri))
+
+	h.mu.Lock()
+	h.latestVersion[uri]++
+	delete(h.latestVersion, uri)
+	h.mu.Unlock()
+
 	h.publishDiagnostics(ctx, uri, nil)
 	return nil
 }
@@ -279,32 +288,7 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 	return nil, nil
 }
 
-func (h *Handler) scheduleValidation(uri protocol.DocumentURI) {
-	h.mu.Lock()
-	if cancel, ok := h.cancelFuncs[uri]; ok {
-		cancel()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	h.cancelFuncs[uri] = cancel
-	h.mu.Unlock()
 
-	go func() {
-		select {
-		case <-time.After(h.config.DiagnosticsDebounce):
-			h.validateDocument(ctx, uri)
-		case <-ctx.Done():
-		}
-	}()
-}
-
-func (h *Handler) cancelValidation(uri protocol.DocumentURI) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if cancel, ok := h.cancelFuncs[uri]; ok {
-		cancel()
-		delete(h.cancelFuncs, uri)
-	}
-}
 
 func (h *Handler) baseDirForURI(uri protocol.DocumentURI) string {
 	h.importBasesMu.RLock()
