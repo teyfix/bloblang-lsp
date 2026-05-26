@@ -10,6 +10,7 @@ import (
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI) {
@@ -20,15 +21,63 @@ func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI
 
 	diagnostics := append([]protocol.Diagnostic{}, h.sampleDiagnosticsFor(uri)...)
 	if text != "" {
-		env := h.benv.WithCustomImporter(func(name string) ([]byte, error) {
-			return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name))
-		})
-		_, err := env.Parse(text)
-		if ctx.Err() != nil {
-			return
+		hasSyntaxError := false
+		tree, parseErr := h.parser.Parse(string(uri), text)
+		if parseErr == nil && tree != nil {
+			root := tree.RootNode()
+			if root.HasError() {
+				hasSyntaxError = true
+				severity := protocol.SeverityError
+				source := "bloblang"
+
+				var collectErrors func(*tree_sitter.Node)
+				collectErrors = func(node *tree_sitter.Node) {
+					if node.IsError() {
+						diagnostics = append(diagnostics, protocol.Diagnostic{
+							Range: protocol.Range{
+								Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
+								End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
+							},
+							Severity: &severity,
+							Source:   source,
+							Message:  "Syntax error",
+						})
+						return
+					}
+					if node.IsMissing() {
+						diagnostics = append(diagnostics, protocol.Diagnostic{
+							Range: protocol.Range{
+								Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
+								End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
+							},
+							Severity: &severity,
+							Source:   source,
+							Message:  fmt.Sprintf("Missing %s", node.Kind()),
+						})
+						return
+					}
+					for i := uint(0); i < node.ChildCount(); i++ {
+						child := node.Child(i)
+						if child.HasError() {
+							collectErrors(child)
+						}
+					}
+				}
+				collectErrors(root)
+			}
 		}
-		if err != nil {
-			diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)
+
+		if !hasSyntaxError {
+			env := h.benv.WithCustomImporter(func(name string) ([]byte, error) {
+				return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name))
+			})
+			_, err := env.Parse(text)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)
+			}
 		}
 	}
 
@@ -137,20 +186,40 @@ func (h *Handler) importHintDiagnostics(uri protocol.DocumentURI, text string) [
 	severity := protocol.SeverityInformation
 	source := "bloblang"
 	var diagnostics []protocol.Diagnostic
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		matches := importRe.FindStringSubmatch(line)
-		if len(matches) != 2 {
-			continue
+
+	tree, parseErr := h.parser.Parse(string(uri), text)
+	if parseErr == nil && tree != nil {
+		root := tree.RootNode()
+		for i := uint(0); i < root.ChildCount(); i++ {
+			child := root.Child(i)
+			if child.Kind() == "import_statement" {
+				var pathStr string
+				for j := uint(0); j < child.ChildCount(); j++ {
+					gc := child.Child(j)
+					if gc.Kind() == "string" {
+						pathStr = gc.Utf8Text([]byte(text))
+						break
+					}
+				}
+				if pathStr == "" {
+					continue
+				}
+				pathStr = strings.Trim(pathStr, "\"`")
+				if strings.HasPrefix(pathStr, `"""`) && strings.HasSuffix(pathStr, `"""`) {
+					pathStr = pathStr[3 : len(pathStr)-3]
+				}
+				resolved := filepath.Join(h.baseDirForURI(uri), pathStr)
+				row := int(child.StartPosition().Row)
+				diagnostics = append(diagnostics, protocol.Diagnostic{
+					Range:    protocol.Range{Start: protocol.Position{Line: row, Character: 0}, End: protocol.Position{Line: row, Character: 0}},
+					Severity: &severity,
+					Source:   source,
+					Message:  fmt.Sprintf("Importing from %s", resolved),
+				})
+			}
 		}
-		resolved := filepath.Join(h.baseDirForURI(uri), matches[1])
-		diagnostics = append(diagnostics, protocol.Diagnostic{
-			Range:    protocol.Range{Start: protocol.Position{Line: i, Character: 0}, End: protocol.Position{Line: i, Character: 0}},
-			Severity: &severity,
-			Source:   source,
-			Message:  fmt.Sprintf("Importing from %s", resolved),
-		})
 	}
+
 	if strings.HasPrefix(string(uri), "untitled:") {
 		diagnostics = append(diagnostics, protocol.Diagnostic{
 			Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 0}},

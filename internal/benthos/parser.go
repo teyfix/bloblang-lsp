@@ -2,6 +2,7 @@ package benthos
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	tree_sitter_bloblang "github.com/teyfix/tree-sitter-bloblang/bindings/go"
@@ -91,6 +92,16 @@ func NewBloblang() (*Bloblang, error) {
 //	call_expr       : function
 //	lambda          : param, body
 //	pair            : key, value
+func endPoint(s string) tree_sitter.Point {
+	lines := strings.Split(s, "\n")
+	row := len(lines) - 1
+	col := len(lines[row])
+	return tree_sitter.Point{
+		Row:    uint(row),
+		Column: uint(col),
+	}
+}
+
 func (b *Bloblang) Parse(uri string, document string) (*tree_sitter.Tree, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -102,6 +113,15 @@ func (b *Bloblang) Parse(uri string, document string) (*tree_sitter.Tree, error)
 	var oldTree *tree_sitter.Tree
 	if cached, ok := b.trees[uri]; ok {
 		oldTree = cached.tree
+		edit := tree_sitter.InputEdit{
+			StartByte:      0,
+			OldEndByte:     uint(len(cached.text)),
+			NewEndByte:     uint(len(document)),
+			StartPosition:  tree_sitter.Point{Row: 0, Column: 0},
+			OldEndPosition: endPoint(cached.text),
+			NewEndPosition: endPoint(document),
+		}
+		oldTree.Edit(&edit)
 	}
 
 	tree := b.parser.Parse([]byte(document), oldTree)
