@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,17 @@ import (
 )
 
 func (h *Handler) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (any, error) {
+
+	if params.Command == "bloblang-lsp.openFile" && len(params.Arguments) == 1 {
+		var uriStr string
+		if err := json.Unmarshal(params.Arguments[0], &uriStr); err != nil {
+			return nil, err
+		}
+		return h.client.ShowDocument(ctx, &protocol.ShowDocumentParams{
+			URI:       protocol.URI(uriStr),
+			TakeFocus: new(true),
+		})
+	}
 
 	if params.Command == "bloblang-lsp.showResult" && len(params.Arguments) == 1 {
 		json := pretty.PrettyOptions(params.Arguments[0], &pretty.Options{

@@ -2,6 +2,7 @@ package lsp_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,11 +122,9 @@ func TestIntegrationInlayHintsAndCodeLens(t *testing.T) {
 	hints := h.GetInlayHints(uri)
 	testutil.AssertInlayHintAt(t, hints, 1, `= "alice"`)
 
-	// Code lens shows the INPUT before the line: no prior assignments → raw sample {"name":"alice"}
+	// Under the new design, small messages don't generate code lenses
 	lenses := h.GetCodeLenses(uri)
-	require.Len(t, lenses, 1)
-	require.NotNil(t, lenses[0].Command)
-	assert.Contains(t, lenses[0].Command.Title, "alice")
+	assert.Empty(t, lenses)
 }
 
 func TestIntegrationNoSampleInlayHintsEmpty(t *testing.T) {
@@ -142,10 +141,16 @@ func TestIntegrationTruncatedCodeLensCommand(t *testing.T) {
 #!sample {"name":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}
 root = this.name`[1:])
 	lenses := h.GetCodeLenses(uri)
-	require.Len(t, lenses, 1)
+	require.Len(t, lenses, 2)
 	require.NotNil(t, lenses[0].Command)
+	assert.Contains(t, lenses[0].Command.Title, "Show Input")
 	assert.Equal(t, "bloblang-lsp.showResult", lenses[0].Command.Command)
-	require.Len(t, lenses[0].Command.Arguments, 1)
+
+	require.NotNil(t, lenses[1].Command)
+	assert.Contains(t, lenses[1].Command.Title, "Show Output")
+	assert.Equal(t, "bloblang-lsp.showResult", lenses[1].Command.Command)
+	require.Len(t, lenses[1].Command.Arguments, 1)
+
 	var full map[string]interface{}
 	require.NoError(t, json.Unmarshal(lenses[0].Command.Arguments[0], &full))
 	assert.Contains(t, full["name"].(string), "abcdefghijklmnopqrstuvwxyz")
@@ -188,10 +193,8 @@ func TestIntegrationSubPathInlayHintsAndCodeLens(t *testing.T) {
 	hints := h.GetInlayHints(uri)
 	testutil.AssertInlayHintAt(t, hints, 1, `"alice"`)
 
-	// code lens should appear on line 1
 	lenses := h.GetCodeLenses(uri)
-	require.Len(t, lenses, 1)
-	require.NotNil(t, lenses[0].Command)
+	assert.Empty(t, lenses)
 }
 
 func TestIntegrationCumulativeLensesAndHints(t *testing.T) {
@@ -206,19 +209,28 @@ func TestIntegrationCumulativeLensesAndHints(t *testing.T) {
 	testutil.AssertInlayHintAt(t, hints, 1, `"alice"`)
 	testutil.AssertInlayHintAt(t, hints, 2, `"age"`)
 
-	// code lenses: line 1 shows input before first assignment → raw sample
-	//              line 2 shows input before second assignment → {"name":"alice"}
 	lenses := h.GetCodeLenses(uri)
-	require.Len(t, lenses, 2)
+	assert.Empty(t, lenses)
+}
 
-	// lens on line 1 (before any assignment) → raw sample contains "alice" and "age":30
-	assert.Equal(t, 1, lenses[0].Range.Start.Line)
-	assert.Contains(t, lenses[0].Command.Title, "alice")
+func TestIntegrationSampleFromCodeLens(t *testing.T) {
+	h := testutil.NewHarness(t)
+	dir := t.TempDir()
+	samplePath := filepath.Join(dir, "my_sample.json")
+	require.NoError(t, os.WriteFile(samplePath, []byte(`{"name":"bob"}`), 0644))
 
-	// lens on line 2 (after first assignment) → {"name":"alice"} only
-	assert.Equal(t, 2, lenses[1].Range.Start.Line)
-	assert.Contains(t, lenses[1].Command.Title, "alice")
-	assert.NotContains(t, lenses[1].Command.Title, "age")
+	uri := "file:///" + filepath.ToSlash(dir) + "/test.blobl"
+	doc := fmt.Sprintf("#!sample_from %s\nroot = this.name", "my_sample.json")
+	h.OpenDocument(uri, doc)
+
+	lenses := h.GetCodeLenses(uri)
+	require.Len(t, lenses, 1)
+	assert.Equal(t, "[Open Sample]", lenses[0].Command.Title)
+	assert.Equal(t, "bloblang-lsp.openFile", lenses[0].Command.Command)
+
+	// Inlay hints should work too
+	hints := h.GetInlayHints(uri)
+	testutil.AssertInlayHintAt(t, hints, 0, `bob`) // hint at sample_from comment end
 }
 
 func TestIntegrationMultilineInlayHint(t *testing.T) {

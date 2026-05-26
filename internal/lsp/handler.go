@@ -117,7 +117,7 @@ func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParam
 			HoverProvider:          ptrTo(true),
 			InlayHintProvider:      &protocol.InlayHintOptions{},
 			CodeLensProvider:       &protocol.CodeLensOptions{},
-			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{Commands: []string{"bloblang-lsp.showResult"}},
+			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{Commands: []string{"bloblang-lsp.showResult", "bloblang-lsp.openFile"}},
 		},
 		ServerInfo: &protocol.ServerInfo{Name: "bloblang-lsp", Version: "v0.0.1"},
 	}, nil
