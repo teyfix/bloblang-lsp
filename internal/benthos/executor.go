@@ -36,6 +36,14 @@ func NewExecutor(benv *bloblang.Environment, cfg *config.Config) *Executor {
 	}
 }
 
+func isStatementKind(kind string) bool {
+	switch kind {
+	case "root_assignment", "let_assignment", "meta_assignment", "map_declaration", "import_statement":
+		return true
+	}
+	return false
+}
+
 // ExecuteCumulative executes all root-assignment statements from the beginning of the
 // document through throughLine (inclusive) and returns the resulting value.
 //
@@ -84,12 +92,12 @@ func (e *Executor) ExecuteCumulative(parser *Bloblang, uri string, sample interf
 		return nil, err
 	}
 
-	// Collect all root-assignment nodes whose start row is <= throughLine.
+	// Collect all statement nodes whose start row is <= throughLine.
 	root := tree.RootNode()
 	var snippetParts []string
 	for i := uint(0); i < root.ChildCount(); i++ {
 		child := root.Child(i)
-		if child.Kind() != "root_assignment" {
+		if !isStatementKind(child.Kind()) {
 			continue
 		}
 		if int(child.StartPosition().Row) <= throughLine {

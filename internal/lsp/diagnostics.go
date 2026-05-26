@@ -28,7 +28,7 @@ func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI
 			if root.HasError() {
 				hasSyntaxError = true
 				severity := protocol.SeverityError
-				source := "bloblang"
+				source := "bloblang (syntax)"
 
 				var collectErrors func(*tree_sitter.Node)
 				collectErrors = func(node *tree_sitter.Node) {
@@ -156,10 +156,17 @@ func (h *Handler) publishDiagnostics(ctx context.Context, uri protocol.DocumentU
 	h.lastDiagnosticsMu.Lock()
 	h.lastDiagnostics[uri] = append([]protocol.Diagnostic(nil), diagnostics...)
 	h.lastDiagnosticsMu.Unlock()
+
+	h.execDiagnosticsMu.RLock()
+	exec := append([]protocol.Diagnostic(nil), h.execDiagnostics[uri]...)
+	h.execDiagnosticsMu.RUnlock()
+
+	merged := append(append([]protocol.Diagnostic(nil), diagnostics...), exec...)
+
 	if h.client == nil {
 		return
 	}
-	if err := h.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: diagnostics}); err != nil {
+	if err := h.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: merged}); err != nil {
 		h.logger.Debug("publish diagnostics failed", "uri", uri, "err", err)
 	}
 }

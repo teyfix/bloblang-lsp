@@ -260,3 +260,23 @@ func TestIntegrationExecDiagnostic(t *testing.T) {
 	// Should have a warning diagnostic on line 1 (the failing root assignment)
 	testutil.AssertDiagnosticAt(t, diags, 1, "")
 }
+
+func TestIntegrationMapDeclarationCumulative(t *testing.T) {
+	h := testutil.NewHarness(t)
+	uri := "file:///tmp/map-cumulative.blobl"
+	doc := `
+#!sample {"user": {"first_name": "john"}}
+map normalize_name {
+  root = this.uppercase()
+}
+root.name = this.user.first_name.apply("normalize_name")`[1:]
+	h.OpenDocument(uri, doc)
+
+	// Inlay hints should work perfectly on line 4 (row 4): output = {"name":"JOHN"}
+	hints := h.GetInlayHints(uri)
+	testutil.AssertInlayHintAt(t, hints, 4, `JOHN`)
+
+	// Verification of diagnostics: no compilation/execution errors should exist
+	diags := h.Server.Diagnostics(protocol.DocumentURI(uri))
+	assert.Empty(t, diags)
+}

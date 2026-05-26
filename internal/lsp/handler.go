@@ -389,7 +389,12 @@ func (h *Handler) publishExecDiagnostics(ctx context.Context, uri protocol.Docum
 	h.execDiagnosticsMu.RUnlock()
 
 	merged := append(base, exec...)
-	h.publishDiagnostics(ctx, uri, merged)
+	if h.client == nil {
+		return
+	}
+	if err := h.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: merged}); err != nil {
+		h.logger.Debug("publish diagnostics failed", "uri", uri, "err", err)
+	}
 }
 
 func sampleDirectiveLine(text string) int {
