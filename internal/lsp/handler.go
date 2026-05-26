@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,7 +114,7 @@ func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParam
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{".", "@", "$"},
 			},
-			HoverProvider:          ptrTo(true),
+			HoverProvider:          new(true),
 			InlayHintProvider:      &protocol.InlayHintOptions{},
 			CodeLensProvider:       &protocol.CodeLensOptions{},
 			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{Commands: []string{"bloblang-lsp.showResult", "bloblang-lsp.openFile"}},
@@ -404,22 +403,6 @@ func sampleDirectiveLine(text string) int {
 		}
 	}
 	return 0
-}
-
-func decodedWorkspacePath(uri protocol.DocumentURI) string {
-	u, err := url.Parse(string(uri))
-	if err != nil {
-		return ""
-	}
-	p, err := url.PathUnescape(u.Path)
-	if err != nil {
-		return ""
-	}
-	return filepath.FromSlash(p)
-}
-
-func ptrTo[T any](v T) *T {
-	return &v
 }
 
 func rawJSON(v any) json.RawMessage {
