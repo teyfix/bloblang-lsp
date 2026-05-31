@@ -28,7 +28,23 @@ sequenceDiagram
 
 ---
 
-## 3. Responsibilities
+## 3. Package Dependencies & Initialization Order
+
+For `main.go` to successfully boot the LSP server, three core packages must be resolved and initialized in the following strict sequential order:
+
+1. **Settings** (`internal/settings/settings.go`):
+   * **Why it's first**: The server configuration must be loaded before any other component is initialized, as both the logger and handler require configuration parameters (e.g. log levels, timeouts, limits).
+   * **Initialization**: Triggered by calling `settings.Load()`.
+2. **Logger** (`internal/telemetry/logger.go`):
+   * **Why it's second**: Logging is the primary telemetry interface. It requires configuration from the Settings package to determine log levels and formats, and must be operational before instantiating the handler to record diagnostic lifecycle logs.
+   * **Initialization**: Instantiated using `telemetry.NewLogger(cfg)`.
+3. **Handler** (`internal/handler/handler.go`):
+   * **Why it's third**: The outer JSON-RPC bridging handler requires references to the resolved configuration (Settings) and structural logging interface (Logger) to coordinate all underlying features and events.
+   * **Initialization**: Constructed by calling `handler.NewHandler(cfg, logger)`.
+
+---
+
+## 4. Responsibilities
 
 The entrypoint must perform the following tasks:
 
@@ -53,7 +69,7 @@ The entrypoint must perform the following tasks:
 
 ---
 
-## 4. Key Constraints & Rules
+## 5. Key Constraints & Rules
 
 ### What is EXPECTED
 * **Pure Stdio separation**: All server logs must go to `os.Stderr`. Any prints to `os.Stdout` will corrupt the JSON-RPC standard protocol parsing and crash client-server synchronization.
