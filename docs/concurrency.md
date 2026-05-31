@@ -6,19 +6,23 @@ This document specifies the concurrency model, event dispatch pipeline, and thre
 
 ## 1. The Mutex-Free Architecture Goal
 
-To prevent deadlocks, resource contention, and race conditions, the language server minimizes the use of raw `sync.Mutex` structures. Instead, it relies on a **Hierarchical Actor Model** using Go channels to synchronize and serialize state:
+To prevent deadlocks, resource contention, and race conditions, the language server minimizes the use of raw `sync.Mutex` structures. Instead, it relies on a **two-level Hierarchical Actor Model** using Go channels to synchronize and serialize state:
 
 ```
 [Handler] 
    |
-   | (Unbuffered Channel: Job Request + Nonce)
+   | (Buffered Channel: ActorMessage + Nonce)
    v
-[Document Actor] (One single-threaded goroutine per document)
+[Document Actor goroutine] (One per open document URI)
    |
-   +---> (Channels) ---> [Feature: Diagnostics] ---\
-   +---> (Channels) ---> [Feature: Inlay Hints]  ===> (Reduce Channels) ---> [Reducer] ---> [Response Channel]
-   +---> (Channels) ---> [Feature: Code Lenses]  ---/
+   +---> feature.Dispatch(FeatureJob) ---> [diagnostic goroutine] (owns its own state) ---\
+   +---> feature.Dispatch(FeatureJob) ---> [sample goroutine]    (owns its own state) ====> (Reduce Channel) ---> [Actor Reducer] ---> [Response/Publish]
+   |
+   +---> feature.Query(QueryJob)      ---> [hover goroutine]      (owns its own state) ----> (Single ReplyCh) ---> [Actor]
+   +---> feature.Query(QueryJob)      ---> [completion goroutine] (owns its own state) ----> (Single ReplyCh) ---> [Actor]
 ```
+
+Each feature goroutine is constructed **per document** by its `DocumentActor`. Because features are document-scoped, they never share state across documents and never need to guard against inter-document races.
 
 ---
 
@@ -29,22 +33,23 @@ Every JSON-RPC request or notification goes through a structured, phased pipelin
 ```mermaid
 sequenceDiagram
     autonumber
-    Client->>Handler: JSON-RPC (e.g. textDocument/inlayHint)
+    Client->>Handler: JSON-RPC (e.g. textDocument/didChange)
     Note over Handler: Generate unique Nonce
-    Handler->>DocumentActor: Dispatch Event (Request + Nonce)
-    Note over DocumentActor: Single-threaded processing
-    
-    par Query Interested Features
-        DocumentActor->>InlayFeature: Channel (Event)
-        InlayFeature-->>DocumentActor: Response Channel (Hints)
-    and Query Other Features
-        Note over DocumentActor: Only features registered for this event are triggered
+    Handler->>DocumentActor: ActorMessage (DidChange + Nonce + ReplyCh)
+    Note over DocumentActor: Single-threaded: reads mailbox sequentially
+
+    par Dispatch to interested AttributeProducers
+        DocumentActor->>diagnostic.loop: FeatureJob (shared ReduceCh)
+        diagnostic.loop-->>ReduceCh: AttributeResponse (Diagnostics)
+    and
+        DocumentActor->>sample.loop: FeatureJob (shared ReduceCh)
+        sample.loop-->>ReduceCh: AttributeResponse (Diagnostics)
+        sample.loop-->>ReduceCh: AttributeResponse (InlayHints)
+        sample.loop-->>ReduceCh: AttributeResponse (CodeLenses)
     end
 
-    Note over DocumentActor: Step 3: Reduce responses into single entity
-    DocumentActor->>Handler: Return final Reduced Response + Nonce
-    Note over Handler: Verify Nonce (Drop if stale)
-    Handler-->>Client: JSON-RPC Response (Inlay Hints)
+    Note over DocumentActor: Collect N responses from ReduceCh, reduce by AttributeType
+    DocumentActor->>Client: PublishDiagnostics (async push via server.Client)
 ```
 
 ### Phase 1: Handler Event Capture
@@ -58,9 +63,10 @@ sequenceDiagram
 * There is **no concurrent state mutation**, eliminating the need for reader/writer locks on the document instance.
 
 ### Phase 3: Concurrent Feature Dispatch
-* The Document Actor determines which features are registered/interested in the incoming event.
-* It fires off processing requests strictly to interested features concurrently.
-* Features consume these events via input channels, execute their isolated business logic (always under 5ms), and reply with their results over individual response channels.
+* The Document Actor determines which `AttributeProducer` features are registered for the incoming event (via `InterestedEvents()`).
+* It calls `feature.Dispatch(FeatureJob)` on each interested feature concurrently, sending jobs into each feature's mailbox channel. The `FeatureJob` carries the shared reduce channel as its `ReplyCh`.
+* Each feature goroutine — which **exclusively owns** all its internal mutable state — processes the job, then writes one `AttributeResponse` per produced attribute onto the shared reduce channel.
+* Because each feature is a separate goroutine owning separate state, concurrent dispatch is race-free by confinement — not by locking.
 
 ### Phase 4: Reduction & Nonce Filtering
 * The actor gathers all feature responses and **reduces** them into a single, unified structure.
@@ -76,9 +82,13 @@ sequenceDiagram
 ## 3. Implementation Rules & Constraints
 
 ### What is EXPECTED
-* **Nonce Validation**: The handler must maintain a tracking registration of outstanding nonces. When a response is received, it must verify the nonce's freshness and drop any outdated payloads.
-* **Clean Feature Subscriptions**: Features must declare their interest list (e.g., subscribing to `DidChange` but ignoring `Hover`) during the initialization handshake.
+* **Nonce Validation**: The handler must maintain a per-URI tracking of the latest outstanding nonce. When a response is received from the actor, it verifies nonce freshness and drops any outdated payloads.
+* **Clean Feature Subscriptions**: Each `AttributeProducer` feature declares its interest list via `InterestedEvents()` — the actor filters on this at dispatch time.
+* **Two-Level Goroutine Hierarchy**: The actor goroutine and each feature goroutine are independent. The actor is the dispatcher and reducer; features are the processors. Neither level enters the other's domain.
+* **Per-Document Feature Instances**: All feature goroutines are constructed fresh at `DidOpen` and terminated at `DidClose`. No feature state persists or is shared across document lifetimes.
 
 ### What is FORBIDDEN
 * **No Shared Mutable State across Actors**: Document Actors must never share pointers to un-snapshotted document structures or AST trees.
-* **No Direct Mutex Locking inside Feature Code**: Features must read from their channels, process parameters locally on the stack, and return outputs over their response channel.
+* **No Direct Mutex Locking inside Feature Code**: Features receive jobs via their mailbox channel, process them entirely on local/owned state, and write results to `job.ReplyCh`. `sync.Mutex` must never appear in a feature package.
+* **No Feature Logic in Actor**: The actor dispatches and reduces. It does not parse ASTs, evaluate expressions, or inspect document content.
+* **No Cross-Feature Communication**: Feature goroutines must never send messages to each other. All information flows through the actor.

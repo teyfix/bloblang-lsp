@@ -6,7 +6,7 @@ This document specifies the design, trigger character parsing, and context-aware
 
 ## 1. Overview & Purpose
 
-The `completion` feature provides context-aware autocomplete recommendations as the user types. By evaluating the AST node context surrounding the cursor position, it selectively presents standard functions, methods, or variable structures to avoid flooding the editor autocomplete dropdown with irrelevant options.
+The `completion` feature provides context-aware autocomplete recommendations as the user types. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. By evaluating the line token context surrounding the cursor position, it selectively presents standard functions, methods, or variable structures.
 
 ---
 
@@ -37,9 +37,11 @@ sequenceDiagram
 
 ## 3. Implementation Specifications
 
-### 1. Registration
-* **Interested Events**: Pure synchronous channel listener.
-* **Output Interface**: Returns `*protocol.CompletionList` directly over its reply channel.
+### 1. Goroutine & Mailbox
+* **Construction**: `completion.New(completionItems, logger)` receives the pre-built completion item cache (built from Benthos reflection at server startup, passed in as an immutable slice) and calls `go f.loop()`. The returned value implements `feature.QueryFeature` — the concrete type is never exported.
+* **Mailbox**: The `DocumentActor` calls `Query(QueryJob)` which sends a `QueryJob` into the feature's mailbox channel and blocks until the feature goroutine replies on `job.ReplyCh`.
+* **Output Interface**: Writes a `QueryResponse` containing `*protocol.CompletionList` directly to `job.ReplyCh`.
+* **Internal State Ownership**: The completion item cache is immutable after construction. No internal mutable state is needed. No locks are used.
 
 ### 2. Trigger Characters & Context Filtering
 * **Announced trigger characters**: `.` (method trigger), `@` (metadata trigger), `$` (variable trigger).

@@ -6,7 +6,7 @@ This document specifies the design, cumulative execution caching, and multi-attr
 
 ## 1. Overview & Purpose
 
-The `sample` feature is the core runtime execution engine of the language server. It parses sample directives (`#!sample` or `#!sample_from`), loads the corresponding JSON inputs, and runs cumulative statement evaluations of Bloblang assignments using the custom executor. 
+The `sample` feature is the core runtime execution engine of the language server. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. It parses sample directives (`#!sample` or `#!sample_from`), loads the corresponding JSON inputs, and runs cumulative statement evaluations of Bloblang assignments using the custom executor.
 
 It acts as a multi-attribute contributor, simultaneously producing **Diagnostics**, **Inlay Hints**, and **Code Lenses**.
 
@@ -35,9 +35,12 @@ graph TD
 
 ## 3. Implementation Specifications
 
-### 1. Registration
+### 1. Goroutine & Mailbox
+* **Construction**: `sample.New(cfg, astParser, logger)` initializes internal state (execution cache, last sample) and calls `go f.loop()`. The returned value implements `feature.AttributeProducer` — the concrete type is never exported.
+* **Mailbox**: A buffered channel of capacity 1. The `DocumentActor` calls `Dispatch(FeatureJob)` to enqueue a job; the feature goroutine processes it and writes `AttributeResponse`s (one per produced attribute) to `job.ReplyCh`.
 * **Interested Events**: `DidOpen`, `DidChange`.
 * **Produced Attributes**: `AttributeDiagnostics`, `AttributeInlayHints`, `AttributeCodeLenses`.
+* **Internal State Ownership**: All internal state (loaded sample, cumulative exec cache, last inlay hints) is owned exclusively by `loop()`. No locks are used.
 
 ### 2. Sample Extraction & Directive Validation
 * Scan the top lines of the document for comments matching:

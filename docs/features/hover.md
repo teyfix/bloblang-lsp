@@ -6,7 +6,7 @@ This document specifies the design, AST node identification, and live execution 
 
 ## 1. Overview & Purpose
 
-The `hover` feature provides interactive contextual information as the user hovers over code elements. It handles:
+The `hover` feature provides interactive contextual information as the user hovers over code elements. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. It handles:
 1. **Standard Library Documentation**: Displays clean markdown summaries, signatures, and example uses of standard Bloblang functions and methods.
 2. **Live State Inspection**: Displays a pretty-printed JSON representation of the cumulative object structure when hovering over the `root` keyword in assignments.
 
@@ -35,9 +35,11 @@ sequenceDiagram
 
 ## 3. Implementation Specifications
 
-### 1. Registration
-* **Interested Events**: Pure synchronous channel listener.
-* **Output Interface**: Returns `*protocol.Hover` directly over its reply channel.
+### 1. Goroutine & Mailbox
+* **Construction**: `hover.New(astParser, functionDocs, methodDocs, logger)` initializes the pre-built doc maps and calls `go f.loop()`. The returned value implements `feature.QueryFeature` — the concrete type is never exported.
+* **Mailbox**: The `DocumentActor` calls `Query(QueryJob)` which sends a `QueryJob` into the feature's mailbox channel and blocks until the feature goroutine replies on `job.ReplyCh`.
+* **Output Interface**: Writes a `QueryResponse` containing `*protocol.Hover` (or nil) directly to `job.ReplyCh`.
+* **Internal State Ownership**: The pre-built `functionDocs` and `methodDocs` maps are loaded once at construction and treated as immutable. The sample execution state is read from the `EventPayload` provided by the actor — hover never requests it independently.
 
 ### 2. Node Under Cursor Identification
 * Translate the hover position (line/char offsets) to a Tree-sitter `Point`.
@@ -51,7 +53,7 @@ sequenceDiagram
 
 ### 4. Step 2: Live State Hover (`root` keyword)
 * If the hovered token matches the keyword `"root"` and its parent node is a `"root_assignment"`:
-  * Access the sample execution cash for the active document.
+  * Access the sample execution state from `payload.SampleState` (provided by the actor from the `sample` feature's last computed output).
   * Retrieve the cumulative output state calculated immediately prior to the current statement line (`lineIndex - 1`).
   * If valid, return a hover card containing the full pretty-printed JSON payload formatted as a code block:
     ```

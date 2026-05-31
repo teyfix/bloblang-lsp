@@ -6,7 +6,7 @@ This document specifies the design, AST evaluation steps, and Benthos compilatio
 
 ## 1. Overview & Purpose
 
-The `diagnostic` feature is responsible for compile-time validation. It runs concurrently inside the `DocumentActor` event pipeline, checking the Tree-sitter Abstract Syntax Tree (AST) for syntax errors and executing the Benthos Bloblang compiler engine to detect semantic errors, unresolved maps, or type mismatches.
+The `diagnostic` feature is responsible for compile-time validation. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. It checks the Tree-sitter AST for syntax errors and executes the Benthos Bloblang compiler engine to detect semantic errors, unresolved maps, or type mismatches.
 
 ---
 
@@ -39,9 +39,12 @@ sequenceDiagram
 
 ## 3. Implementation Specifications
 
-### 1. Registration
+### 1. Goroutine & Mailbox
+* **Construction**: `diagnostic.New(astParser, logger)` initializes internal state and calls `go f.loop()`. The returned value implements `feature.AttributeProducer` — the concrete type is never exported.
+* **Mailbox**: A buffered channel of capacity 1. The `DocumentActor` calls `Dispatch(FeatureJob)` to enqueue a job; the feature goroutine processes it and writes `AttributeResponse`s to `job.ReplyCh`.
 * **Interested Events**: `DidOpen`, `DidChange`.
 * **Produced Attributes**: `AttributeDiagnostics`.
+* **Internal State Ownership**: All internal state (Benthos environment cache, last error map) is owned exclusively by `loop()`. No locks are used.
 
 ### 2. Step 1: Tree-sitter AST Syntax Validation
 * Inspect the root node of the parsed Tree-sitter tree (`payload.AST.RootNode()`).
