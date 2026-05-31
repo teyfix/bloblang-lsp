@@ -11,7 +11,7 @@ import (
 	"github.com/owenrumney/go-lsp/server"
 	"github.com/teyfix/bloblang-lsp/modular/config"
 	"github.com/teyfix/bloblang-lsp/modular/lsphandler"
-	"github.com/teyfix/bloblang-lsp/modular/pipeline"
+	"github.com/teyfix/bloblang-lsp/modular/meta"
 )
 
 func main() {
@@ -54,8 +54,8 @@ func main() {
 			},
 			ExecuteCommand: &protocol.ExecuteCommandOptions{
 				Commands: []string{
-					string(pipeline.CommandShowResult),
-					string(pipeline.CommandOpenFile),
+					string(meta.CommandOpenFile),
+					string(meta.CommandShowResult),
 				},
 			},
 		}),

@@ -8,9 +8,3 @@ const ServerName = "bloblang-lsp"
 
 // ServerVersion is the version string reported in the LSP initialize response.
 const ServerVersion = "v0.0.1"
-
-// CommandShowResult is the command ID for showing truncated outputs.
-const CommandShowResult = "bloblang/showResult"
-
-// CommandOpenFile is the command ID for navigating to external sample JSON files.
-const CommandOpenFile = "bloblang/openFile"

@@ -22,10 +22,14 @@ func NewBloblang() (*Bloblang, error) {
 	return &Bloblang{parser: parser}, nil
 }
 
-func (b *Bloblang) Parse(document string) (*tree_sitter.Tree, error) {
-	if tree := b.parser.Parse([]byte(document), nil); tree != nil {
-		return tree, nil
+// Parse takes a Bloblang document string and returns its syntax tree.
+//
+// The returned tree's root node has kind "source" and contains zero or more
+// statement nodes as direct children. Callers must call tree.Close() when done.
+func (b *Bloblang) Parse(uri string, document string) (*tree_sitter.Tree, error) {
+	tree := b.parser.Parse([]byte(document), nil)
+	if tree == nil {
+		return nil, fmt.Errorf("could not parse document: tree is nil")
 	}
-
-	return nil, fmt.Errorf("could not parse document: %s", "tree is nil")
+	return tree, nil
 }
