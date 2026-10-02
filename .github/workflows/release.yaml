@@ -107,6 +107,7 @@ jobs:
                 rm "${legacy}.exe"
               else
                 cp "$binary" "$legacy"
+                chmod 755 "$legacy"
                 tar -czf "${legacy}.tar.gz" "$legacy"
                 rm "$legacy"
               fi
