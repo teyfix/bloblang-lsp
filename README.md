@@ -1,6 +1,20 @@
 # Bloblang Language Server
 
-A single Go LSP binary for Bloblang and mappings embedded in Redpanda Connect YAML. The VS Code extension in `../vscode-bloblang` bundles this binary and supplies language highlighting.
+A single Go LSP binary for Bloblang and mappings embedded in Redpanda Connect YAML. Diagnostics, formatting, completion, hover previews, navigation and linting live in the server and are available to LSP clients. The [VS Code extension](https://github.com/teyfix/vscode-bloblang) supplies editor integration and highlighting, downloads and extracts the latest server release archive, and caches the executable for later starts.
+
+![Typing a Bloblang mapping in VS Code with live highlighting and completion](docs/demos/typing.gif)
+
+## Try it in VS Code
+
+Install [Bloblang for VS Code](https://marketplace.visualstudio.com/items?itemName=teyfix.vscode-bloblang), then open a `.blobl`, `.bloblang` or Redpanda Connect YAML file. The extension manages the server automatically; no Go toolchain or manual server installation is needed. To use a local build, set `bloblang.server.path` to its executable.
+
+The demos below show the server in action through the VS Code extension. Each focuses on a separate feature.
+
+### Embedded YAML mappings
+
+Highlighting, diagnostics, completion, hover and navigation work inside recognized YAML mapping values, including quoted scalars and literal/folded blocks. Run **Bloblang: Format Embedded Mappings** from the Command Palette to format those values while preserving surrounding YAML. Short scalars keep their style; values that wrap become literal blocks. Changed folded blocks also become literal blocks. `${! ... }` interpolations receive language features but are not formatted. Embedded server features require valid host YAML.
+
+![Bloblang highlighted inside quoted YAML mapping and check values in VS Code](docs/demos/yaml-highlighting.gif)
 
 ## Editor features
 
@@ -14,6 +28,10 @@ A single Go LSP binary for Bloblang and mappings embedded in Redpanda Connect YA
 Each embedded mapping is evaluated independently. A sample describes that mapping's input; the server does not infer intermediate processor inputs from a pipeline. Hover inside reached `if` branches retains branch conditions and preceding statements. Named maps and per-element/lambda contexts with no selected invocation do not show invented runtime values.
 
 ## Samples
+
+Provide sample input to inspect values while editing, without running a pipeline. Hover `this`, assignment targets, variables and supported expressions; assignment end hints show output after each statement. In VS Code, **Show Input** and **Show Output** lenses open full previews for larger values.
+
+![Sampled input and output hover previews in VS Code](docs/demos/sample-hover.gif)
 
 For `mapping.blobl`, the default is a sibling `mapping.sample.json`, `.yaml` or `.yml`. Files must have a `$bloblang` envelope:
 
@@ -127,16 +145,26 @@ Each workspace root can contain `.bloblangrc.json`. Multi-root workspaces use th
 
 See the [generated rule reference](docs/features/lint-rules.md) for defaults and fix availability. Rule keys stay flat for autocomplete. All rules accept `off`, `hint`, `info`, `warn` or `error`, either as a string or an object with `severity`. `minAssignments` is specific to grouped assignments. Metadata, defaults and schema properties live in `internal/editorconfig`; regenerate the bundled schema with `go run ./cmd/config-schema > schemas/bloblangrc.schema.json`.
 
-The formatter preserves tokens, comments, string contents and explicit parentheses. It collapses short expression groups, expands longer groups, and verifies its output with Tree-sitter and Benthos before offering edits. YAML mappings preserve short scalar styles where valid; multiline output uses literal blocks. Formatting does not apply lint refactors.
+### Formatting and previews
+
+Use **Format Document** in a Bloblang file or **Bloblang: Format Embedded Mappings** in YAML. The formatter preserves tokens, comments, string contents and explicit parentheses. It collapses short expression groups, expands longer groups, and verifies its output with Tree-sitter and Benthos before offering edits. YAML mappings preserve short scalar styles where valid; multiline output uses literal blocks. Formatting does not apply lint refactors.
+
+![Formatting a Bloblang object in VS Code to fit the configured print width](docs/demos/formatting.gif)
 
 Hover values, inlay tooltips and Show Output share YAML previews by default. Set `preview.format` to `json` for compact JSON. Both use `formatter.printWidth`; inline labels have their own size limit. An unset `env()` is null, so `.catch(...)` alone does not satisfy the environment rule. Use `.or(default)`, `.or(throw("required"))`, or `.not_null().catch(throw("required"))`.
 
+### Lint suggestions and Quick Fixes
+
 Lint suggestions account for object merge/replacement, missing fields and effectful evaluation. Grouped assignments, projections, deletion and existence checks are advisory. Consecutive `.without()` calls with literal arguments have an explicit Quick Fix. The server does not implement `source.fixAll`; formatting does not apply lint refactors. See [lint behavior and fixes](docs/features/lint.md).
+
+![A Bloblang lint diagnostic and its explicit Quick Fix in VS Code](docs/demos/lint-quick-fix.gif)
 
 ```bloblang
 # bloblang-lint-disable-next-line correctness/environment/require-fallback -- optional value
 root.optional = env("OPTIONAL")
 ```
+
+### Selecting samples for embedded YAML
 
 Inline YAML mappings are numbered in document order from 001, excluding interpolation and external `from` mappings. An immediately adjacent comment at the mapping key's indentation selects a sample explicitly:
 
