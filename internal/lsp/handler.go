@@ -477,7 +477,7 @@ func (h *Handler) publishExecDiagnostics(ctx context.Context, uri protocol.Docum
 	exec := append([]protocol.Diagnostic(nil), h.execDiagnostics[uri]...)
 	h.execDiagnosticsMu.RUnlock()
 
-	merged := append(base, exec...)
+	merged := mergeDiagnostics(base, exec)
 	if h.client == nil || strings.Contains(string(uri), "#bloblang-") {
 		return
 	}

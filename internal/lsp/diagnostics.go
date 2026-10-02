@@ -145,7 +145,7 @@ func (h *Handler) publishDiagnostics(ctx context.Context, uri protocol.DocumentU
 	exec := append([]protocol.Diagnostic(nil), h.execDiagnostics[uri]...)
 	h.execDiagnosticsMu.RUnlock()
 
-	merged := append(append([]protocol.Diagnostic(nil), diagnostics...), exec...)
+	merged := mergeDiagnostics(diagnostics, exec)
 
 	if h.client == nil {
 		return
@@ -253,4 +253,12 @@ func (h *Handler) diagnosticsText(uri protocol.DocumentURI, text string) []proto
 	diagnostics = append(diagnostics, h.sampleDiagnosticsFor(uri)...)
 	diagnostics = append(diagnostics, h.lintDiagnostics(uri, text)...)
 	return diagnostics
+}
+
+// LSP requires an array even when clearing diagnostics. A nil Go slice encodes
+// as null, which vscode-languageclient rejects and leaves stale errors visible.
+func mergeDiagnostics(base, execution []protocol.Diagnostic) []protocol.Diagnostic {
+	merged := make([]protocol.Diagnostic, 0, len(base)+len(execution))
+	merged = append(merged, base...)
+	return append(merged, execution...)
 }
