@@ -63,9 +63,11 @@ func Load() (*Config, error) {
 	}
 
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok && filepath.Base(v.ConfigFileUsed()) != ".bloblangrc.json" {
 			return nil, err
 		}
+		// Workspace editor JSON is validated independently; invalid editor settings
+		// must not prevent the language server from starting.
 	}
 
 	var cfg Config

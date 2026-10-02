@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -37,4 +38,14 @@ func TestConfigEnvironmentOverride(t *testing.T) {
 
 	assert.Equal(t, "debug", cfg.LogLevel)
 	assert.Equal(t, 500*time.Millisecond, cfg.DiagnosticsDebounce)
+}
+
+func TestInvalidEditorConfigDoesNotPreventStartup(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	assert.NoError(t, os.WriteFile(filepath.Join(dir, ".bloblangrc.json"), []byte(`{"preview":`), 0600))
+	cfg, err := Load()
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
+	assert.Equal(t, 100, cfg.MaxInlineResultBytes)
 }
