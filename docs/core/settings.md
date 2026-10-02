@@ -1,53 +1,51 @@
-> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+# Configuration
 
-# Module Specification: Settings (`settings.go`)
+The server has two configuration readers: startup settings in [`internal/config`](../../internal/config/config.go) and workspace editor settings in [`internal/editorconfig`](../../internal/editorconfig/config.go). The VS Code `.bloblangrc.json` schema describes workspace editor settings.
 
-This document specifies the design, properties, and configuration lifecycle of the **Settings** package (`internal/settings/settings.go`).
+## Workspace editor settings
 
----
+Place `.bloblangrc.json` at a workspace root. The server chooses the longest matching workspace root for the document, falling back to the first workspace root, or the document's parent directory when no workspace root is available. Embedded mappings use their host YAML document's directory. It does not search upward for nested configuration files.
 
-## 1. Overview & Purpose
+| Setting | Default | Accepted values |
+| --- | --- | --- |
+| `formatter.printWidth` | `80` | Integer from 20 through 1000 |
+| `preview.format` | `"yaml"` | `"yaml"` or `"json"` |
+| `lint.enabled` | `true` | Boolean |
+| `lint.rules` | Registry defaults | Flat slash-separated rule IDs |
 
-The `settings` package is the configuration manager of the language server. It loads, unmarshals, and provides a typed configuration structure to the rest of the application. It parses configuration parameters from standard files (`.bloblangrc`) and overrides them with environment variables prefixed with `BLOBLANG_LSP_`.
+Rules accept a severity string or an object containing `severity`. Severities are `off`, `hint`, `info`, `warn`, and `error`. Only `style/assignments/prefer-grouped` accepts `minAssignments`, an integer of at least 3. See [lint configuration](../features/lint.md) and the [generated rule reference](../features/lint-rules.md).
 
----
+The file is read on demand. Client file-watch events revalidate diagnostics and refresh previews; requests also see current settings without restarting. Invalid JSON, unknown properties or rule IDs, and invalid values cause the entire workspace editor configuration to fall back to defaults. The extension associates the generated schema for completion and validation. Invalid editor configuration does not prevent server startup.
 
-## 2. Configuration Schema & Properties
+Registry metadata drives both the schema and generated rule reference:
 
-The `Config` structure defines parameters governing logs, size limits, and execution caching:
+```sh
+go run ./cmd/config-schema > schemas/bloblangrc.schema.json
+go run ./cmd/config-schema --rules > docs/features/lint-rules.md
+```
 
-| Property | Type | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `BloblangDocsURL` | `string` | `"https://docs.redpanda.com/... "` | Base URL for accessing Bloblang standard method/function documentation. |
-| `LogLevel` | `string` | `"info"` | Log level output tier (`debug`, `info`, `warn`, `error`). |
-| `MaxInlineDocumentBytes`| `int` | `150000` | Maximum file size allowed for processing inline results. Prevent execution on huge files. |
-| `MaxInlineResultBytes` | `int` | `100` | Truncation limit for rendering inline evaluation values in the editor. |
-| `PartialExecCacheSize` | `int` | `1000` | Max entries in the cumulative statement execution cache. |
-| `PartialExecCacheTTL` | `time.Duration`| `5 * time.Minute` | Time-to-live for cached statement evaluations. |
+## Legacy server startup settings
 
-> [!NOTE]
-> **Debouncing Omission**: As execution times across all features take under 5ms, all debouncing settings and options are explicitly omitted from the configuration schema to keep the implementation simple.
+Viper searches for the `.bloblangrc` base name with supported file extensions, for example `.bloblangrc.yaml`, in the process working directory, home directory, then `$XDG_CONFIG_HOME/bloblang-lsp` (or `~/.config/bloblang-lsp`). The first discovered file is loaded; files from those locations are not merged. Environment variables override file values and defaults.
 
----
+```yaml
+# .bloblangrc.yaml
+log_level: info
+max_inline_document_bytes: 150000
+max_inline_result_bytes: 100
+```
 
-## 3. Configuration Sources & Precedence
+| Key | Default | Current use |
+| --- | --- | --- |
+| `bloblang_docs_url` | `https://docs.redpanda.com/redpanda-connect/guides/bloblang` | Documentation links |
+| `log_level` | `info` | Server logging |
+| `max_inline_document_bytes` | `150000` | Execution size limit |
+| `max_inline_result_bytes` | `100` | Inline label truncation; does not set preview print width |
+| `diagnostics_debounce` | `200ms` | Retained legacy setting; current handler does not debounce validation |
+| `inline_result_debounce` | `100ms` | Retained legacy setting; current handler does not debounce evaluation |
+| `partial_exec_cache_size` | `1000` | Retained legacy setting; current executor does not maintain this cache |
+| `partial_exec_cache_ttl` | `5m` | Retained legacy setting; current executor does not maintain this cache |
 
-Viper reads configurations from multiple locations, applying the following precedence order (highest to lowest):
+Every key has an environment override named `BLOBLANG_LSP_<UPPERCASE_KEY>`, for example `BLOBLANG_LSP_MAX_INLINE_RESULT_BYTES=200`. Startup settings are loaded once; changing them requires restarting the server.
 
-1. **Environment Variables**: Overrides any file configuration. Format: `BLOBLANG_LSP_<UPPERCASE_KEY>` (e.g., `BLOBLANG_LSP_LOG_LEVEL`).
-2. **Current Directory**: Looking for `.bloblangrc` in the workspace root path where the server process is executed.
-3. **XDG Config Directory**: `XDG_CONFIG_HOME/bloblang-lsp/.bloblangrc` (or fallback to `~/.config/bloblang-lsp/.bloblangrc` on Unix).
-4. **User Home Directory**: `~/.bloblangrc`.
-5. **Static Defaults**: Hardcoded compile-time values declared inside `settings.go`.
-
----
-
-## 4. Key Constraints & Rules
-
-### What is EXPECTED
-* **Read-Only / Thread-Safety**: The settings struct is read-only after initial load at process startup. It is passed as a pointer to other modules, which can read from it concurrently without locking.
-* **Deterministic Defaults**: If no `.bloblangrc` or environment variables are provided, the server must fallback to safe, documented default values without throwing an error.
-
-### What is FORBIDDEN
-* **No Mutex Locking in Readers**: Since the configuration is immutable after initialization, never wrap reads in mutex locks.
-* **No Direct File Refreshes**: Do not support dynamic runtime config reloads unless explicitly requested, avoiding unnecessary filesystem polling or watch-loops.
+Viper can also discover `.bloblangrc.json`, but its startup reader only recognizes the legacy snake_case settings. Keep editor JSON limited to its schema, and configure legacy settings through environment variables or a separate server config file. The editor configuration reader does not accept legacy server keys.

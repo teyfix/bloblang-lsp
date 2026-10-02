@@ -1,81 +1,9 @@
-> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+# Diagnostics
 
-# Feature Specification: Diagnostic Feature (`diagnostic.go`)
+[`diagnostics.go`](../../internal/lsp/diagnostics.go) combines Benthos parse/import errors, sample issues, sample execution warnings, and AST lint findings. YAML external mapping links also receive path diagnostics. Embedded mapping ranges are converted back to host YAML coordinates; compiler columns are converted to LSP UTF-16 positions.
 
-This document specifies the design, AST evaluation steps, and Benthos compilation rules of the **Diagnostic** feature (`internal/feature/diagnostic/`).
+Validation runs after document changes. A version check discards stale validation results. Editing clears prior execution diagnostics, and clients receive an empty `diagnostics: []` notification when errors are repaired or documents close. Valid comment-only sample directives do not produce an unexpected-end mapping error.
 
----
+Missing automatic samples are informational. Missing explicitly selected files, malformed samples, and bad directives are errors. Sample failures leave static completion, documentation, navigation, formatting, and linting available. Successful compilation can still produce a warning when evaluation against the selected sample fails.
 
-## 1. Overview & Purpose
-
-The `diagnostic` feature is responsible for compile-time validation. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. It checks the Tree-sitter AST for syntax errors and executes the Benthos Bloblang compiler engine to detect semantic errors, unresolved maps, or type mismatches.
-
----
-
-## 2. Technical Execution Pipeline
-
-```mermaid
-sequenceDiagram
-    autonumber
-    Actor->>Diagnostic: ProduceAttribute(Event, Payload)
-    
-    Note over Diagnostic: Step 1: AST Syntax Traversal
-    opt AST has syntax errors
-        Note over Diagnostic: Gather ERROR/MISSING nodes
-    end
-    
-    Note over Diagnostic: Step 2: Benthos Environment Parse
-    opt Syntax is clean
-        Diagnostic->>Benthos Env: env.Parse(Text)
-        Benthos Env-->>Diagnostic: error
-        Note over Diagnostic: Match & extract multiline error line/char
-    end
-    
-    Note over Diagnostic: Step 3: Parse Import Nodes
-    Note over Diagnostic: Verify absolute path on filesystem
-    
-    Diagnostic-->>Actor: AttributeResponse (TypeDiagnostics, []Diagnostic)
-```
-
----
-
-## 3. Implementation Specifications
-
-### 1. Goroutine & Mailbox
-* **Construction**: `diagnostic.New(astParser, logger)` initializes internal state and calls `go f.loop()`. The returned value implements `feature.AttributeProducer` — the concrete type is never exported.
-* **Mailbox**: A buffered channel of capacity 1. The `DocumentActor` calls `Dispatch(FeatureJob)` to enqueue a job; the feature goroutine processes it and writes `AttributeResponse`s to `job.ReplyCh`.
-* **Interested Events**: `DidOpen`, `DidChange`.
-* **Produced Attributes**: `AttributeDiagnostics`.
-* **Internal State Ownership**: All internal state (Benthos environment cache, last error map) is owned exclusively by `loop()`. No locks are used.
-
-### 2. Step 1: Tree-sitter AST Syntax Validation
-* Inspect the root node of the parsed Tree-sitter tree (`payload.AST.RootNode()`).
-* If `root.HasError()` is true, recursively traverse children:
-  * For any node where `IsError()` is true $\rightarrow$ Generate a `protocol.Diagnostic` with `SeverityError`, `Source = "bloblang (syntax)"`, and message `"Syntax error"`.
-  * For any node where `IsMissing()` is true $\rightarrow$ Generate a `protocol.Diagnostic` with `SeverityError`, `Source = "bloblang (syntax)"`, and message `"Missing <node_kind>"`.
-* **Important**: If syntax errors are found, skip Benthos semantic compilation to prevent flooded compiler errors.
-
-### 3. Step 2: Benthos Environment Semantic Parse
-* If syntax is clean, fetch or instantiate a Benthos Bloblang `Environment` loaded with custom filesystem importers matching the document's base directory.
-* Call `env.Parse(payload.Text)`.
-* If a parsing error occurs, parse the error message structure:
-  * Detect `"line <X> char <Y>"` using string scans or regex.
-  * Extract the clean compiler message (excluding location metadata).
-  * Translate 1-indexed compiler offsets to 0-indexed LSP coordinates.
-  * Generate a `protocol.Diagnostic` with `SeverityError`, `Source = "bloblang"`.
-
-### 4. Step 3: Import Resolution Verification
-* Locate all `import_statement` nodes in the tree-sitter AST.
-* Resolve the target import path (e.g. `import "./methods.blobl"`) against the document's local base directory.
-* Generate an information-level diagnostic (`SeverityInformation`, `Source = "bloblang"`) stating: `"Importing from <absolute_path>"`. This provides users with instant visual confirmation of resolved path targets.
-
----
-
-## 4. Key Constraints & Rules
-
-### What is EXPECTED
-* **Pure Compile-time Validation**: Focus strictly on compilation semantics and syntax correctness. Do not execute runtime evaluations or load samples in this feature.
-* **Instant processing**: Execution must finish within 1-2ms on typical documents, avoiding goroutine thread starvation.
-
-### What is FORBIDDEN
-* **No Client Calls**: The feature must never directly invoke `client.PublishDiagnostics(...)`. It merely returns its diagnostic array over its response channel to the `DocumentActor`, which handles reduction and publication.
+Lint findings use stable slash-separated diagnostic codes and source `bloblang lint`. Rule severities, disabling, and next-line suppression are configured as described in [linting](lint.md). Invalid workspace settings fall back to defaults; their schema validation belongs to the editor's JSON support.

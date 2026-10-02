@@ -5,3 +5,11 @@ The shipped server is `cmd/bloblang-lsp` and `internal/lsp`. The older `cmd/lang
 See the repository [README](../README.md) for features, samples, packaging and validation. Source is the reference for behavior. YAML mappings are extracted into independent document regions and mapped back to host positions; the server does not simulate a YAML processor pipeline. Named map definitions and lambda bodies have no unique runtime invocation context, so ambiguous sampled hovers are omitted.
 
 Logs go to stderr. Stdout is reserved for JSON-RPC. Diagnostics publish asynchronously because the go-lsp transport must continue reading client responses. Client refresh requests are sent only when the client advertises support. go-lsp 0.2.5 includes the required `result: null` JSON-RPC response fix.
+
+## Current feature documentation
+
+- [Configuration](core/settings.md): startup server settings and live workspace editor JSON.
+- [Completion](features/completion.md), [hovers and previews](features/hover.md), [samples](features/sample.md), and [diagnostics](features/diagnostic.md).
+- [Lint behavior and fixes](features/lint.md) and [generated rule reference](features/lint-rules.md).
+
+The remaining package and core design notes are marked historical where they describe the abandoned rewrite.

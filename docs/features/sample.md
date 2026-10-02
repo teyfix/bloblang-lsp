@@ -1,74 +1,42 @@
-> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+# Samples and runtime previews
 
-# Feature Specification: Sample Feature (`sample.go`)
+[`internal/benthos/sample.go`](../../internal/benthos/sample.go) extracts samples, and [`executor.go`](../../internal/benthos/executor.go) evaluates complete statement prefixes or selected expressions through the public Benthos runtime. Each evaluation starts from a fresh input and optional root target; the server does not simulate processor pipelines or cache cumulative execution results.
 
-This document specifies the design, cumulative execution caching, and multi-attribute output rules of the **Sample** feature (`internal/feature/sample/`).
+For `mapping.blobl`, automatic discovery looks for `mapping.sample.json`, `.yaml`, or `.yml`. File samples require the `$bloblang` envelope:
 
----
-
-## 1. Overview & Purpose
-
-The `sample` feature is the core runtime execution engine of the language server. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. It parses sample directives (`#!sample` or `#!sample_from`), loads the corresponding JSON inputs, and runs cumulative statement evaluations of Bloblang assignments using the custom executor.
-
-It acts as a multi-attribute contributor, simultaneously producing **Diagnostics**, **Inlay Hints**, and **Code Lenses**.
-
----
-
-## 2. System Orchestration & Multi-Attribute Flow
-
-```mermaid
-graph TD
-    Actor[DocumentActor] -->|Produce: All Attributes| Sample[sample Feature]
-    
-    Sample -->|Step 1: Parse Directive| Parse[Load JSON Sample]
-    Parse -->|JSON Corrupt / File Missing| Diag[Produce Diagnostics]
-    
-    Parse -->|JSON Valid| Exec[Cumulative Executor]
-    
-    Exec -->|Evaluate Variables & States| Hints[Produce Inlay Hints]
-    Exec -->|Evaluate Truncations| Lenses[Produce Code Lenses]
-    
-    Diag -->|Channel Reply| Actor
-    Hints -->|Channel Reply| Actor
-    Lenses -->|Channel Reply| Actor
+```yaml
+$bloblang:
+  input:
+    name: Ada
+  meta:
+    topic: people
 ```
 
----
+`input` is required, including when its value is `null`. `meta` is optional and must be an object. Optional `root` seeds a separate output target for overlay mappings while `this` continues to read `input`.
 
-## 3. Implementation Specifications
+Inline directives before mapping statements accept JSON or YAML values:
 
-### 1. Goroutine & Mailbox
-* **Construction**: `sample.New(cfg, astParser, logger)` initializes internal state (execution cache, last sample) and calls `go f.loop()`. The returned value implements `feature.AttributeProducer` — the concrete type is never exported.
-* **Mailbox**: A buffered channel of capacity 1. The `DocumentActor` calls `Dispatch(FeatureJob)` to enqueue a job; the feature goroutine processes it and writes `AttributeResponse`s (one per produced attribute) to `job.ReplyCh`.
-* **Interested Events**: `DidOpen`, `DidChange`.
-* **Produced Attributes**: `AttributeDiagnostics`, `AttributeInlayHints`, `AttributeCodeLenses`.
-* **Internal State Ownership**: All internal state (loaded sample, cumulative exec cache, last inlay hints) is owned exclusively by `loop()`. No locks are used.
+```bloblang
+#!input {"name":"Ada"}
+#!meta {"topic":"people"}
+root.name = this.name.uppercase()
+```
 
-### 2. Sample Extraction & Directive Validation
-* Scan the top lines of the document for comments matching:
-  * `#!sample <raw_json_string>`: Parse the inline JSON string.
-  * `#!sample_from <relative_path>`: Read and parse the target relative JSON file from the filesystem.
-* **Diagnostics Contribution**: If the JSON is invalid, or if the relative file is missing, generate a diagnostic on the directive comment line with `SeverityWarning`, `Source = "bloblang"`, stating the parsing or filesystem error.
+`#!sample` accepts an object containing `input` and optional `meta` and `root`, without a `$bloblang` envelope. It overrides automatic sibling discovery. `#!input`, `#!meta`, and `#!root` override their respective fields of a valid automatically selected sample. The corresponding `_from` directives load file values from a mandatory `$bloblang` envelope. Paths resolve relative to the mapping or host YAML file.
 
-### 3. Inlay Hints Contribution
-If a valid sample exists, traverse the AST and compute inline annotations:
-* **Directive Hint**: Render ` = <short_json>` at the end of the comment, with a tooltip containing the complete pretty-printed JSON structure.
-* **Before-Assignment Hint**: For each `root_assignment` statement, query `h.executor.ExecuteCumulative(...)` up to the preceding statement index. Renders `: <short_value>` at the end of the `root` keyword.
-* **After-Assignment Hint**: Query the cumulative executor up to the current statement index. Renders ` = <short_value>` at the end of the statement node.
-* **Value Shortening Rules**: Use standard JSON marshalling, truncate strings exceeding `MaxInlineResultBytes` by appending the ellipsis `…`, and generate detailed pretty-printed JSON structures in the hover tooltips.
+Multiline directives use a `|` header followed by `#|` continuation comments. Empty arguments, duplicate directive names, unknown directives, malformed data, and missing explicit files produce errors. A valid directive without mapping statements is a valid editor state.
 
-### 4. Code Lenses Contribution
-* **Open Sample Link**: If `#!sample_from <path>` is used, generate a `[Open Sample]` lens on the comment line that maps to the `bloblang/openFile` command, passing the absolute target URI.
-* **Input / Output Lenses**: If the cumulative result of a statement exceeds `MaxInlineResultBytes` (meaning it was truncated in the inlay hint), generate `Show Input (size)` and `Show Output (size)` lenses at the beginning of the assignment line mapping to the `bloblang/showResult` command.
+## Embedded YAML selection
 
----
+Inline mappings are numbered from 001 in document order; external `from` mappings and `${! ... }` interpolations do not consume numbers. For a host named `config.yaml`, selection prefers an explicit adjacent comment, then `config.sample-001.json` (also `.yaml` or `.yml`), then `config.sample.json` (also `.yaml` or `.yml`). The comment must immediately precede the mapping key and have the same indentation:
 
-## 4. Key Constraints & Rules
+```yaml
+processor:
+  # bloblang-sample: selected.sample.yaml
+  mapping: |
+    root = this
+```
 
-### What is EXPECTED
-* **Unified State Consistency**: The sample extraction, execution cache lookup, and attribute outputs must be synchronized to ensure inlay hints, code lenses, and diagnostics are perfectly aligned and do not render mismatched states.
-* **Fast Caching**: Use the `PartialExecCache` to avoid re-evaluating the entire script on minor cursor changes, ensuring cumulative evaluations complete in microseconds.
+Multiple candidates at an automatically selected sibling level are ambiguous; use an explicit whole-sample source. Inline whole-sample directives can override file selection. Missing automatic samples produce informational diagnostics; malformed samples and missing explicit paths produce errors. Sample errors disable dynamic values and leave static features available.
 
-### What is FORBIDDEN
-* **No Direct File System Modifying**: The feature must only read files from the filesystem; it never writes or deletes them.
-* **No Nonce Interference**: The feature does not manage nonces; it simply receives the transaction nonce from the actor and passes it back on the reply channel.
+File-watch notifications reload samples for open documents, including file creation, modification, and deletion. Valid samples enable before/after assignment inlays, input/output lenses for truncated values, sample-file navigation lenses, and supported value hovers. See the [README](../../README.md#samples) for directive examples and [hover rendering](hover.md) for preview configuration.

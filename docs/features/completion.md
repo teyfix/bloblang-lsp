@@ -1,69 +1,7 @@
-> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+# Completion
 
-# Feature Specification: Autocomplete Completion Feature (`completion.go`)
+The handler builds function and method snippets and documentation from the Benthos environment at startup. Completion triggers are `.`, `@`, and `$`.
 
-This document specifies the design, trigger character parsing, and context-aware filtering of the **Completion** feature (`internal/feature/completion/`).
+A dot selects method completions. When a valid sample provides a reliable receiver value, the server filters type-specific methods and can add object-field suggestions. Generic methods remain available. Without a reliable sample result, all static method completions remain available.
 
----
-
-## 1. Overview & Purpose
-
-The `completion` feature provides context-aware autocomplete recommendations as the user types. It is a **self-contained goroutine** constructed once per document by `DocumentActor`. By evaluating the line token context surrounding the cursor position, it selectively presents standard functions, methods, or variable structures.
-
----
-
-## 2. Technical Execution Flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    Actor->>Completion: Channel (CompletionParams, Nonce)
-    Note over Completion: Step 1: Extract preceding line tokens
-    
-    alt Preceding token ends with "." (Method trigger)
-        Note over Completion: Filter completion items to "Method" kinds
-        Completion-->>Actor: CompletionList (Methods) + Nonce
-    alt Preceding token ends with "@" (Metadata trigger)
-        Note over Completion: Return metadata references / options
-        Completion-->>Actor: CompletionList (Metadata Keys) + Nonce
-    alt Preceding token ends with "$" (Variable trigger)
-        Note over Completion: Return local scope variable completions
-        Completion-->>Actor: CompletionList (Variables) + Nonce
-    else Standard expression context
-        Note over Completion: Return standard "Function" kinds
-        Completion-->>Actor: CompletionList (Functions) + Nonce
-    end
-```
-
----
-
-## 3. Implementation Specifications
-
-### 1. Goroutine & Mailbox
-* **Construction**: `completion.New(completionItems, logger)` receives the pre-built completion item cache (built from Benthos reflection at server startup, passed in as an immutable slice) and calls `go f.loop()`. The returned value implements `feature.QueryFeature` — the concrete type is never exported.
-* **Mailbox**: The `DocumentActor` calls `Query(QueryJob)` which sends a `QueryJob` into the feature's mailbox channel and blocks until the feature goroutine replies on `job.ReplyCh`.
-* **Output Interface**: Writes a `QueryResponse` containing `*protocol.CompletionList` directly to `job.ReplyCh`.
-* **Internal State Ownership**: The completion item cache is immutable after construction. No internal mutable state is needed. No locks are used.
-
-### 2. Trigger Characters & Context Filtering
-* **Announced trigger characters**: `.` (method trigger), `@` (metadata trigger), `$` (variable trigger).
-* When autocomplete is invoked, inspect the cursor's character offsets on the current line:
-  * **Method Autocomplete Context**: If the preceding characters indicate a dot-prefix (e.g. `this.`), filter the pre-built completion cache list, returning **only** items with `Kind = protocol.CompletionItemKindMethod`.
-  * **Function Autocomplete Context**: If the cursor is positioned in an open statement area (no dot-prefix), filter the cache, returning **only** items with `Kind = protocol.CompletionItemKindFunction`.
-  * **Variable/Metadata Context**: If typing `@` or `$`, return local reference snippets.
-
-### 3. Pre-Compiled Autocomplete Cache
-* To guarantee sub-millisecond response times, the completion feature must maintain a pre-constructed index of all Bloblang standard functions and methods.
-* The index is generated once upon server handshake (`Initialize`) using the Benthos reflection environment APIs.
-
----
-
-## 4. Key Constraints & Rules
-
-### What is EXPECTED
-* **Sub-millisecond responses**: Autocomplete queries must return in under 1ms. Caching must be completely offline in memory.
-* **Snippets Integration**: Include standard snippet completions for common blocks (e.g., `map` definitions or `if` statements) when completing in open source scopes.
-
-### What is FORBIDDEN
-* **No AST Traversal on keystroke**: Do not perform deep recursive AST parsing during autocomplete calculations. Rely strictly on rapid, lightweight token scans of the current line text to identify the trigger character context.
-* **No Mutex Locking**: The pre-built completion list is treated as an immutable shared array. No locks should be held during reads.
+`$` suggests visible local variables using AST scopes and declaration order. `@` suggests keys from the sample metadata. Other expression contexts return function completions. Embedded mappings forward requests through their mapped document regions; source is in [`completion.go`](../../internal/lsp/completion.go) and [`Handler.Completion`](../../internal/lsp/handler.go).
