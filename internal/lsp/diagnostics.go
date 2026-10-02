@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
 	"github.com/teyfix/bloblang-lsp/internal/benthos"
+	"github.com/teyfix/bloblang-lsp/internal/fileuri"
 )
 
 func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI, version uint64) {
@@ -157,21 +157,7 @@ func (h *Handler) publishDiagnostics(ctx context.Context, uri protocol.DocumentU
 }
 
 func uriToPath(uri protocol.DocumentURI) (string, error) {
-	u, err := url.Parse(string(uri))
-	if err != nil {
-		return "", err
-	}
-	if u.Scheme != "file" {
-		return "", fmt.Errorf("unsupported scheme: %s", u.Scheme)
-	}
-	p, err := url.PathUnescape(u.Path)
-	if err != nil {
-		return "", err
-	}
-	if os.PathSeparator == '\\' && len(p) > 0 && p[0] == '/' {
-		p = p[1:]
-	}
-	return filepath.FromSlash(p), nil
+	return fileuri.Path(string(uri))
 }
 
 func (h *Handler) importHintDiagnostics(uri protocol.DocumentURI, text string) []protocol.Diagnostic {

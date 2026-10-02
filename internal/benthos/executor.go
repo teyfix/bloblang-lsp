@@ -2,7 +2,6 @@ package benthos
 
 import (
 	"encoding/json"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
 	"github.com/redpanda-data/benthos/v4/public/service"
 	"github.com/teyfix/bloblang-lsp/internal/config"
+	"github.com/teyfix/bloblang-lsp/internal/fileuri"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -251,11 +251,7 @@ func looksIncomplete(err error) bool {
 	return strings.Contains(msg, "unexpected eof") || strings.Contains(msg, "unexpected end") || strings.Contains(msg, "unterminated")
 }
 func urlPath(uri string) (string, error) {
-	u, err := url.Parse(uri)
-	if err != nil {
-		return "", err
-	}
-	return filepath.FromSlash(u.Path), nil
+	return fileuri.Path(uri)
 }
 
 func containsNode(parent, node *tree_sitter.Node) bool {

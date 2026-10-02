@@ -3,8 +3,8 @@ package lsp
 import (
 	"context"
 	protocol "github.com/owenrumney/go-lsp/lsp"
+	"github.com/teyfix/bloblang-lsp/internal/fileuri"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,7 +120,7 @@ func visibleDefinition(ss []symbol, s *symbol) *symbol {
 	return best
 }
 func fileURI(path string) protocol.DocumentURI {
-	return protocol.DocumentURI((&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String())
+	return protocol.DocumentURI(fileuri.FromPath(path))
 }
 func (h *Handler) Definition(_ context.Context, p *protocol.DefinitionParams) ([]protocol.Location, error) {
 	uri := p.TextDocument.URI

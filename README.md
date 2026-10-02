@@ -92,7 +92,7 @@ go build -a -o target/bloblang-lsp ./cmd/bloblang-lsp
 
 To develop against the sibling grammar, use `go mod edit -replace github.com/teyfix/tree-sitter-bloblang=../tree-sitter-bloblang` locally and remove that replacement before committing. Use `-a` after regenerating its grammar: the included `parser.c` lives outside the Go package directory and Go's normal package cache can miss the change.
 
-Tagged releases publish `bloblang-lsp-<os>-<arch>` binaries (`.exe` on Windows) and `SHA256SUMS` for Linux, macOS and Windows on amd64 and arm64. The VS Code extension downloads the latest release for its host platform and verifies the checksum. A configured external binary can also be used for development.
+Tagged releases publish `bloblang-lsp-<os>-<arch>` binaries (`.exe` on Windows), matching `language-server-v<version>-<os>-<arch>` tar/ZIP archives, and `SHA256SUMS` for Linux, macOS and Windows on amd64 and arm64. The VS Code extension downloads and extracts the latest matching archive. The server binary itself is not compressed at runtime. A configured external binary can also be used for development.
 
 To verify a private mapping corpus without changing files:
 

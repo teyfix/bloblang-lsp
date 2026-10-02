@@ -16,7 +16,7 @@ tasks:
     env:
       CGO_ENABLED: "{{.CGO_ENABLED}}"
     vars:
-      COMPRESS: '{{ default true .COMPRESS }}'
+      COMPRESS: '{{ default "false" .COMPRESS }}'
     deps:
       - for: { matrix: { OS: [linux, darwin, windows], ARCH: [amd64, arm64] } }
         task: build:target
@@ -37,7 +37,7 @@ tasks:
     vars:
       BIN: '{{default (printf "language-server-%s-%s-%s" .VERSION .OS .ARCH) .BIN}}'
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
-      COMPRESS: '{{ default true .COMPRESS }}'
+      COMPRESS: '{{ default "false" .COMPRESS }}'
     cmds:
       - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/bloblang-lsp/main.go"
       - if: '{{ eq .COMPRESS "true" }}'

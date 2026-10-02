@@ -94,11 +94,31 @@ jobs:
           path: target
           merge-multiple: true
 
+      - name: Package archives for extension downloads
+        run: |
+          cd target
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              binary="bloblang-lsp-${os}-${arch}"
+              legacy="language-server-${VERSION}-${os}-${arch}"
+              if [ "$os" = windows ]; then
+                cp "${binary}.exe" "${legacy}.exe"
+                zip -q "${legacy}.zip" "${legacy}.exe"
+                rm "${legacy}.exe"
+              else
+                cp "$binary" "$legacy"
+                tar -czf "${legacy}.tar.gz" "$legacy"
+                rm "$legacy"
+              fi
+            done
+          done
+
       - name: Generate checksums
         run: |
           cd target
           test "$(find . -maxdepth 1 -type f -name 'bloblang-lsp-*' | wc -l)" -eq 6
-          sha256sum bloblang-lsp-* > SHA256SUMS
+          test "$(find . -maxdepth 1 -type f -name 'language-server-*' | wc -l)" -eq 6
+          sha256sum bloblang-lsp-* language-server-* > SHA256SUMS
           sha256sum --check SHA256SUMS
 
       - name: Create release

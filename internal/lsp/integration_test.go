@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/teyfix/bloblang-lsp/internal/fileuri"
 	"github.com/teyfix/bloblang-lsp/internal/testutil"
 )
 
@@ -97,7 +97,7 @@ func TestIntegrationCloseClearsDiagnostics(t *testing.T) {
 func TestIntegrationImportHints(t *testing.T) {
 	h := testutil.NewHarness(t)
 	dir := filepath.ToSlash(t.TempDir())
-	uri := "file:///" + strings.TrimPrefix(dir, "/") + "/map.blobl"
+	uri := fileuri.FromPath(filepath.Join(dir, "map.blobl"))
 	h.OpenDocument(uri, "import \"foo.blobl\"\nroot = \"ok\"")
 	diags := h.WaitForDiagnostics(uri, time.Second)
 	testutil.AssertDiagnosticAt(t, diags, 0, filepath.Join(filepath.FromSlash(dir), "foo.blobl"))

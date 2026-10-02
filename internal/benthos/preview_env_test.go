@@ -2,6 +2,7 @@ package benthos
 
 import (
 	"github.com/stretchr/testify/require"
+	"github.com/teyfix/bloblang-lsp/internal/fileuri"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,7 +65,7 @@ func TestPreviewEnvironmentInImportedMapAndDynamicLookup(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "import.blobl"), []byte(`map lookup { root = "import=" + env(this.name) }`), 0600))
 	text := "import \"import.blobl\"\nroot = this.apply(\"lookup\")"
 	executor := NewExecutor(NewEnvironment(), testExecutorConfig())
-	result, err := executor.ExecuteThrough(newTestParser(t), "file://"+filepath.Join(dir, "mapping.blobl"), &Sample{Value: map[string]any{"name": name}}, text, uint(len(text)))
+	result, err := executor.ExecuteThrough(newTestParser(t), fileuri.FromPath(filepath.Join(dir, "mapping.blobl")), &Sample{Value: map[string]any{"name": name}}, text, uint(len(text)))
 	require.NoError(t, err)
 	require.Equal(t, "import=", result.Value)
 }
