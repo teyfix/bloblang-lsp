@@ -47,7 +47,7 @@ func TestIntegrationFunctionHover(t *testing.T) {
 	h.OpenDocument(uri, "root = json(\"name\")")
 	hover := h.GetHover(uri, protocol.Position{Line: 0, Character: len("root = js")})
 	require.NotNil(t, hover)
-	assert.Contains(t, hover.Contents.Value(), "# [json]")
+	assert.Contains(t, hover.Contents.Value(), "**[json]")
 }
 
 func TestIntegrationDiagnostics(t *testing.T) {
@@ -151,7 +151,7 @@ root = this.name`[1:])
 	require.NotNil(t, lenses[1].Command)
 	assert.Contains(t, lenses[1].Command.Title, "Show Output")
 	assert.Equal(t, "bloblang-lsp.showResult", lenses[1].Command.Command)
-	require.Len(t, lenses[1].Command.Arguments, 1)
+	require.Len(t, lenses[1].Command.Arguments, 2)
 
 	var full map[string]interface{}
 	require.NoError(t, json.Unmarshal(lenses[0].Command.Arguments[0], &full))
@@ -164,8 +164,8 @@ func TestIntegrationRootHover(t *testing.T) {
 	h.OpenDocument(uri, "#!input {\"name\":\"alice\"}\nroot = this.name")
 	hover := h.GetHover(uri, protocol.Position{Line: 1, Character: 1})
 	require.NotNil(t, hover)
-	assert.Contains(t, hover.Contents.Value(), "```json")
-	assert.Contains(t, hover.Contents.Value(), `"alice"`)
+	assert.Contains(t, hover.Contents.Value(), "```yaml")
+	assert.Contains(t, hover.Contents.Value(), `alice`)
 }
 
 func TestIntegrationRootHoverNoSample(t *testing.T) {
@@ -192,7 +192,7 @@ func TestIntegrationSubPathInlayHintsAndCodeLens(t *testing.T) {
 
 	// inlay hint should appear on line 1 showing the output {"name":"alice"}
 	hints := h.GetInlayHints(uri)
-	testutil.AssertInlayHintAt(t, hints, 1, `"alice"`)
+	testutil.AssertInlayHintAt(t, hints, 1, `alice`)
 
 	lenses := h.GetCodeLenses(uri)
 	assert.Empty(t, lenses)
@@ -207,7 +207,7 @@ func TestIntegrationCumulativeLensesAndHints(t *testing.T) {
 	// inlay hints: line 1 shows output after first assignment → {"name":"alice"}
 	//              line 2 shows output after both assignments → {"age":30,"name":"alice"}
 	hints := h.GetInlayHints(uri)
-	testutil.AssertInlayHintAt(t, hints, 1, `"alice"`)
+	testutil.AssertInlayHintAt(t, hints, 1, `alice`)
 	testutil.AssertInlayHintAt(t, hints, 2, `"age"`)
 
 	lenses := h.GetCodeLenses(uri)

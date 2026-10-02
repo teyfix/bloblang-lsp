@@ -19,7 +19,7 @@ func TestBuildDocumentation(t *testing.T) {
 	}
 	doc := BuildDocumentation("test_func", "functions", "this is a test description", ex, nil, "v1.0.0", "beta", "https://docs.redpanda.com/redpanda-connect/guides/bloblang")
 
-	assert.Contains(t, doc.Value, "# [test_func]")
+	assert.Contains(t, doc.Value, "**[test_func]")
 	assert.Contains(t, doc.Value, "**[β Beta]**")
 	assert.Contains(t, doc.Value, "this is a test description")
 	assert.Contains(t, doc.Value, "test summary")
@@ -46,8 +46,8 @@ func TestBuildAllDocs(t *testing.T) {
 	}
 
 	fnMarkup, methMarkup := BuildAllDocs(fnDocs, methDocs, "https://docs.redpanda.com/redpanda-connect/guides/bloblang")
-	assert.Contains(t, fnMarkup["test_func"].Value, "# [test_func]")
-	assert.Contains(t, methMarkup["test_meth"].Value, "# [test_meth]")
+	assert.Contains(t, fnMarkup["test_func"].Value, "**[test_func]")
+	assert.Contains(t, methMarkup["test_meth"].Value, "**[test_meth]")
 }
 
 func TestBuildAllDocsKnownEntries(t *testing.T) {

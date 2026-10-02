@@ -11,13 +11,16 @@ import (
 )
 
 type embeddedRegion struct {
-	uri           protocol.DocumentURI
-	text          string
-	offsets       []int
-	start, end    int
-	style         yaml.Style
-	indent        int
-	interpolation bool
+	uri               protocol.DocumentURI
+	text              string
+	offsets           []int
+	start, end        int
+	style             yaml.Style
+	indent            int
+	interpolation     bool
+	samplePath        string
+	sampleNumber      int
+	keyRow, keyIndent int
 }
 
 func yamlDocument(uri protocol.DocumentURI) bool {
@@ -48,7 +51,12 @@ func extractRegions(uri protocol.DocumentURI, text string) []embeddedRegion {
 	walk = func(n *yaml.Node, mapping bool) {
 		if n.Kind == yaml.MappingNode {
 			for i := 0; i+1 < len(n.Content); i += 2 {
+				before := len(out)
 				walk(n.Content[i+1], mappingKeys[n.Content[i].Value])
+				for j := before; j < len(out) && n.Content[i+1].Kind == yaml.ScalarNode; j++ {
+					out[j].keyRow = n.Content[i].Line - 1
+					out[j].keyIndent = n.Content[i].Column - 1
+				}
 			}
 			return
 		}
@@ -82,7 +90,21 @@ func extractRegions(uri protocol.DocumentURI, text string) []embeddedRegion {
 		}
 	}
 	walk(&doc, false)
+	number := 0
 	for i := range out {
+		if !out[i].interpolation {
+			number++
+			out[i].sampleNumber = number
+			row := out[i].keyRow - 1
+			if row >= 0 {
+				line := lines[row]
+				indent := len(line) - len(strings.TrimLeft(line, " "))
+				trim := strings.TrimSpace(line)
+				if indent == out[i].keyIndent && strings.HasPrefix(trim, "# bloblang-sample:") {
+					out[i].samplePath = strings.TrimSpace(strings.TrimPrefix(trim, "# bloblang-sample:"))
+				}
+			}
+		}
 		out[i].uri = protocol.DocumentURI(fmt.Sprintf("%s#bloblang-%d", uri, i))
 	}
 	return out
@@ -316,7 +338,7 @@ func (h *Handler) syncRegions(uri protocol.DocumentURI, text string) {
 	h.clearRegions(uri)
 	for _, r := range extractRegions(uri, text) {
 		_, _ = h.documents.Open(&protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: r.uri, LanguageID: "bloblang", Text: r.text}})
-		h.updateSample(r.uri, r.text)
+		h.updateRegionSample(uri, r)
 	}
 }
 func (h *Handler) regionAt(uri protocol.DocumentURI, p protocol.Position) (embeddedRegion, protocol.Position, bool) {

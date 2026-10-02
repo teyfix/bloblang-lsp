@@ -1,11 +1,13 @@
 package benthos
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -77,8 +79,10 @@ var directiveHandlers = map[string]DirectiveHandler{
 
 func decodeSampleValue(data []byte) (any, error) {
 	var v any
-	if json.Unmarshal(data, &v) == nil {
-		return v, nil
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if decoder.Decode(&v) == nil {
+		return normalizeNumbers(v), nil
 	}
 	if err := yaml.Unmarshal(data, &v); err != nil {
 		return nil, err
@@ -146,7 +150,12 @@ func loadSample(c *sampleContext, path, field string) error {
 	return nil
 }
 
-func ExtractSample(_ *Bloblang, uri, text, baseDir string) (*Sample, error) {
+func ExtractSample(parser *Bloblang, uri, text, baseDir string) (*Sample, error) {
+	return ExtractSampleWithSource(parser, uri, text, baseDir, "", "")
+}
+
+// ExtractSampleWithSource selects an explicit YAML source or numbered sibling before the shared sibling.
+func ExtractSampleWithSource(_ *Bloblang, uri, text, baseDir, explicitPath, numberedStem string) (*Sample, error) {
 	c := &sampleContext{sample: Sample{Source: "inline"}}
 	u, _ := url.Parse(uri)
 	stem := strings.TrimSuffix(filepath.Base(u.Path), filepath.Ext(u.Path))
@@ -156,6 +165,25 @@ func ExtractSample(_ *Bloblang, uri, text, baseDir string) (*Sample, error) {
 		if _, err := os.Stat(p); err == nil {
 			siblings = append(siblings, p)
 		}
+	}
+	if numberedStem != "" {
+		var numbered []string
+		for _, ext := range []string{"json", "yaml", "yml"} {
+			p := filepath.Join(baseDir, numberedStem+"."+ext)
+			if _, err := os.Stat(p); err == nil {
+				numbered = append(numbered, p)
+			}
+		}
+		if len(numbered) > 0 {
+			siblings = numbered
+		}
+	}
+	if explicitPath != "" {
+		p := explicitPath
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(baseDir, p)
+		}
+		siblings = []string{p}
 	}
 	lines := strings.Split(text, "\n")
 	// Explicit entire-sample source resolves sibling ambiguity.
@@ -250,4 +278,26 @@ func ExtractSample(_ *Bloblang, uri, text, baseDir string) (*Sample, error) {
 		return nil, nil
 	}
 	return &c.sample, nil
+}
+
+func normalizeNumbers(v any) any {
+	switch x := v.(type) {
+	case json.Number:
+		if i, e := strconv.ParseInt(string(x), 10, 64); e == nil {
+			return i
+		}
+		if f, e := strconv.ParseFloat(string(x), 64); e == nil {
+			return f
+		}
+		return x.String()
+	case map[string]any:
+		for k, c := range x {
+			x[k] = normalizeNumbers(c)
+		}
+	case []any:
+		for i, c := range x {
+			x[i] = normalizeNumbers(c)
+		}
+	}
+	return v
 }

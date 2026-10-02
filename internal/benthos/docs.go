@@ -47,7 +47,7 @@ func BuildDocumentation(
 ) protocol.MarkupContent {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# [%s](%s/%s/#%s) – %s\n\n", name, docsURL, kind, name, kind))
+	sb.WriteString(fmt.Sprintf("**[%s](%s/%s/#%s)** · %s\n\n", name, docsURL, kind, name, kind))
 
 	// Status badge — shown at the top so it's immediately visible on hover.
 	switch status {
@@ -65,9 +65,9 @@ func BuildDocumentation(
 	}
 
 	// Examples section — capped at 3 to keep hover docs readable.
-	const maxExamples = 3
+	maxExamples := len(examples)
 	if len(examples) > 0 {
-		sb.WriteString("## Examples\n\n")
+		sb.WriteString("**Examples**\n\n")
 
 		shown := examples
 		truncated := 0
@@ -81,7 +81,7 @@ func BuildDocumentation(
 				sb.WriteString(strings.ReplaceAll(fmt.Sprintf("%s\n\n", ex.Summary), "#####", "###"))
 			}
 
-			sb.WriteString("### Mapping\n\n")
+			sb.WriteString("**Mapping**\n\n")
 			sb.WriteString("```bloblang\n")
 			sb.WriteString(strings.TrimSpace(ex.Mapping))
 			sb.WriteString("\n```\n\n")
@@ -97,13 +97,13 @@ func BuildDocumentation(
 					}
 
 					sb.WriteString(
-						fmt.Sprintf("#### Input%s\n\n", suffix),
+						fmt.Sprintf("**Input%s**\n\n", suffix),
 					)
 					sb.WriteString(renderCodeBlock(r[0]))
 					sb.WriteString("\n")
 
 					sb.WriteString(
-						fmt.Sprintf("#### Output%s\n\n", suffix),
+						fmt.Sprintf("**Output%s**\n\n", suffix),
 					)
 					sb.WriteString(renderCodeBlock(r[1]))
 					sb.WriteString("\n")
@@ -128,11 +128,11 @@ func BuildDocumentation(
 
 	// Method categories — only present for MethodView items.
 	if len(categories) > 0 {
-		sb.WriteString("## Categories\n")
+		sb.WriteString("**Categories**\n")
 
 		for _, c := range categories {
 			sb.WriteString(
-				fmt.Sprintf("### [%s](%s/methods/#%s)\n\n", c.Category, docsURL, toKebabCase(c.Category)),
+				fmt.Sprintf("[%s](%s/methods/#%s)\n\n", c.Category, docsURL, toKebabCase(c.Category)),
 			)
 
 			if c.Description != "" {

@@ -34,6 +34,7 @@ type Handler struct {
 	mu sync.Mutex
 
 	workspaceRoot  string
+	workspaceRoots []string
 	importBaseDirs map[protocol.DocumentURI]string
 	importBasesMu  sync.RWMutex
 
@@ -91,6 +92,11 @@ func (h *Handler) SetClient(client *server.Client) {
 }
 
 func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+	for _, folder := range params.WorkspaceFolders {
+		if path, err := uriToPath(folder.URI); err == nil {
+			h.workspaceRoots = append(h.workspaceRoots, path)
+		}
+	}
 	if len(params.WorkspaceFolders) > 0 {
 		if path, err := uriToPath(params.WorkspaceFolders[0].URI); err == nil {
 			h.workspaceRoot = path
@@ -122,6 +128,7 @@ func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParam
 			DefinitionProvider:         new(true),
 			ReferencesProvider:         new(true),
 			DocumentFormattingProvider: new(true),
+			CodeActionProvider:         &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionQuickFix}},
 			InlayHintProvider:          &protocol.InlayHintOptions{},
 			CodeLensProvider:           &protocol.CodeLensOptions{},
 			ExecuteCommandProvider:     &protocol.ExecuteCommandOptions{Commands: []string{"bloblang-lsp.showResult", "bloblang-lsp.openFile"}},
@@ -252,6 +259,20 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 		cp.Position = pos
 		v, err := h.Hover(ctx, &cp)
 		if v != nil && v.Range != nil {
+			localTree, e := h.parser.Parse(string(r.uri)+":range", r.text)
+			if e == nil && localTree != nil {
+				if localTree.RootNode().HasError() {
+					if v.Range.Start.Line == 0 {
+						v.Range.Start.Character = max(0, v.Range.Start.Character-7)
+					}
+					if v.Range.End.Line == 0 {
+						v.Range.End.Character = max(0, v.Range.End.Character-7)
+					}
+				}
+				localTree.Close()
+			}
+		}
+		if v != nil && v.Range != nil {
 			host, _ := h.documents.Text(uri)
 			*v.Range = r.hostRange(host, *v.Range)
 		}
@@ -270,6 +291,21 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 		return nil, nil
 	}
 
+	if tree.RootNode().HasError() && strings.Contains(string(uri), "#bloblang-") {
+		wrapped, e := h.parser.Parse(string(uri)+":expression", "root = "+text)
+		if e == nil && wrapped != nil {
+			if !wrapped.RootNode().HasError() {
+				tree.Close()
+				tree = wrapped
+				text = "root = " + text
+				if lineIdx == 0 {
+					col += 7
+				}
+			} else {
+				wrapped.Close()
+			}
+		}
+	}
 	defer tree.Close()
 	root := tree.RootNode()
 	point := tree_sitter.Point{
@@ -298,12 +334,15 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 				}
 			} else {
 				expression := hoverExpression(node)
+				if node.Kind() == "identifier" && node.Parent() != nil && node.Parent().Kind() == "let_assignment" && node.Parent().ChildByFieldName("name").Id() == node.Id() {
+					expression = node.Parent().ChildByFieldName("value")
+				}
 				if expression != nil {
 					result, err = h.executor.EvaluateExpression(h.parser, string(uri), sample, text, statement, expression)
 				}
 			}
 			if err == nil && result != nil {
-				v := valueHover(result, node)
+				v := h.valueHover(uri, result, node)
 				if v.Range != nil {
 					*v.Range = rangeUTF16(text, *v.Range)
 				}
@@ -312,6 +351,13 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 		}
 	}
 
+	if node.Kind() == "deleted" || (node.Parent() != nil && node.Parent().Kind() == "deleted") {
+		doc := h.functionDocs["deleted"]
+		if doc.Value == "" {
+			doc = protocol.MarkupContent{Kind: protocol.Markdown, Value: "**deleted()**\nReturns a deletion marker. Assigning it to a field removes that field; assigning it to root filters the whole message."}
+		}
+		return &protocol.Hover{Contents: protocol.NewHoverContents(doc.Kind, doc.Value)}, nil
+	}
 	// 2. Functions & Methods hover
 	if node.Kind() == "identifier" && node.Parent() != nil {
 		parent := node.Parent()
@@ -358,6 +404,9 @@ func (h *Handler) baseDirForURI(uri protocol.DocumentURI) string {
 
 func (h *Handler) updateSample(uri protocol.DocumentURI, text string) {
 	sample, err := benthos.ExtractSample(h.parser, string(uri), text, h.baseDirForURI(uri))
+	h.storeSample(uri, text, sample, err)
+}
+func (h *Handler) storeSample(uri protocol.DocumentURI, text string, sample *benthos.Sample, err error) {
 	h.samplesMu.Lock()
 	h.samples[uri] = sample
 	h.samplesMu.Unlock()

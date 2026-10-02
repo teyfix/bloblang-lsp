@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
-	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
 )
 
 func (h *Handler) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (any, error) {
@@ -25,23 +24,22 @@ func (h *Handler) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCo
 		})
 	}
 
-	if params.Command == "bloblang-lsp.showResult" && len(params.Arguments) == 1 {
-		json := pretty.PrettyOptions(params.Arguments[0], &pretty.Options{
-			Width:    h.config.MaxInlineResultBytes,
-			Prefix:   "",
-			Indent:   "  ",
-			SortKeys: false,
-		})
+	if params.Command == "bloblang-lsp.showResult" && len(params.Arguments) >= 1 {
+		var origin protocol.DocumentURI
+		if len(params.Arguments) > 1 {
+			_ = json.Unmarshal(params.Arguments[1], &origin)
+		}
+		lang, body := h.preview(origin, string(params.Arguments[0]))
 
 		// 1. Create a temporary JSON file
-		tmpFile, err := os.CreateTemp("", "bloblang-sample-*.json")
+		tmpFile, err := os.CreateTemp("", "bloblang-sample-*."+lang)
 		if err != nil {
 			// Log error and fallback to window/showMessage
 			return nil, err
 		}
 
 		// 2. Write the raw data
-		if _, err := tmpFile.Write(json); err != nil {
+		if _, err := tmpFile.WriteString(body + "\n"); err != nil {
 			return nil, err
 		}
 		tmpFile.Close() // Close it so the editor can read it

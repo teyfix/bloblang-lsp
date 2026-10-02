@@ -240,5 +240,6 @@ func (h *Handler) diagnosticsText(uri protocol.DocumentURI, text string) []proto
 		diagnostics = append(diagnostics, h.importHintDiagnostics(uri, text)...)
 	}
 	diagnostics = append(diagnostics, h.sampleDiagnosticsFor(uri)...)
+	diagnostics = append(diagnostics, h.lintDiagnostics(uri, text)...)
 	return diagnostics
 }

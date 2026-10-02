@@ -43,7 +43,7 @@ func TestSampledExpressionHoverAndMetadata(t *testing.T) {
 	h, uri := featureHandler(t)
 	text := "#!input {\"a\":1,\"s\":\"hey\",\"root\":\"property\"}\n#!meta {\"k\":\"v\"}\nlet root = \"variable\"\nroot.a = 9\nroot.b = this.a\nroot.c = root.a\nroot.m = meta(\"k\")\nmeta k = \"changed\"\nroot.n = @k\nroot.z = this.s.uppercase()\nroot.prop = this.root\nroot.var = $root\nroot.bad = ("
 	openFeature(t, h, uri, text)
-	for needle, want := range map[string]string{"this.a": "1", "root.a\nroot.m": "9", "this.s": "\"hey\"", "this.root": "\"property\"", "$root": "\"variable\"", "@k": "\"changed\""} {
+	for needle, want := range map[string]string{"this.a": "1", "root.a\nroot.m": "9", "this.s": "hey", "this.root": "property", "$root": "variable", "@k": "changed"} {
 		v := hoverAt(t, h, uri, text, needle)
 		require.NotNil(t, v, needle)
 		require.Contains(t, v.Contents.Value(), want, needle)

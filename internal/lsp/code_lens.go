@@ -79,7 +79,7 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 				Command: &protocol.Command{
 					Title:     fmt.Sprintf("Show Input (%s)", humanize.Bytes(uint64(len(resultBefore.Full)))),
 					Command:   "bloblang-lsp.showResult",
-					Arguments: []json.RawMessage{[]byte(resultBefore.Full)},
+					Arguments: []json.RawMessage{[]byte(resultBefore.Full), rawJSON(string(uri))},
 				},
 			})
 		}
@@ -108,7 +108,7 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 				Command: &protocol.Command{
 					Title:     fmt.Sprintf("Show Output (%s)", humanize.Bytes(uint64(len(resultAfter.Full)))),
 					Command:   "bloblang-lsp.showResult",
-					Arguments: []json.RawMessage{[]byte(resultAfter.Full)},
+					Arguments: []json.RawMessage{[]byte(resultAfter.Full), rawJSON(string(uri))},
 				},
 			})
 		}

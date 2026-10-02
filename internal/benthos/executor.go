@@ -106,16 +106,23 @@ func (e *Executor) execute(uri string, sample *Sample, snippet string) (*Partial
 	return e.result(value, meta, false)
 }
 func cloneValue(v any) any {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return v
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, c := range x {
+			out[k] = cloneValue(c)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, c := range x {
+			out[i] = cloneValue(c)
+		}
+		return out
 	}
-	var out any
-	if json.Unmarshal(b, &out) != nil {
-		return v
-	}
-	return out
+	return v
 }
+
 func documentDir(uri string) string {
 	if i := strings.Index(uri, "#"); i >= 0 {
 		uri = uri[:i]

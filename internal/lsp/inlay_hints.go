@@ -3,7 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -85,7 +85,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 		commentText := child.Utf8Text([]byte(text))
 		lineText := strings.TrimSpace(commentText)
 		if strings.HasPrefix(lineText, "#!sample ") || strings.HasPrefix(lineText, "#!sample_from ") {
-			shortVal, prettyVal := shortValue(sample.Value, h.config.MaxInlineResultBytes)
+			shortVal, _ := shortValue(sample.Value, h.config.MaxInlineResultBytes)
 			hints = append(hints, protocol.InlayHint{
 				Position: protocol.Position{
 					Line:      int(child.EndPosition().Row),
@@ -94,7 +94,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 				Label: rawJSON(" = " + shortVal),
 				Tooltip: &protocol.MarkupContent{
 					Kind:  protocol.Markdown,
-					Value: fmt.Sprintf("```json\n%s\n```", prettyVal),
+					Value: h.previewMarkdown(uri, string(rawJSON(sample.Value))),
 				},
 			})
 		}
@@ -122,7 +122,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 					Label: rawJSON(": " + resultBefore.Text),
 					Tooltip: &protocol.MarkupContent{
 						Kind:  protocol.Markdown,
-						Value: fmt.Sprintf("```json\n%s\n```", prettyResult(resultBefore.Full)),
+						Value: h.previewMarkdown(uri, resultBefore.Full),
 					},
 				})
 			}
@@ -152,7 +152,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 				Label: rawJSON(" = " + resultAfter.Text),
 				Tooltip: &protocol.MarkupContent{
 					Kind:  protocol.Markdown,
-					Value: fmt.Sprintf("```json\n%s\n```", prettyResult(resultAfter.Full)),
+					Value: h.previewMarkdown(uri, resultAfter.Full),
 				},
 			})
 		}

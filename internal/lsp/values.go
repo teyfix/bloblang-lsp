@@ -3,7 +3,7 @@ package lsp
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/teyfix/bloblang-lsp/internal/benthos"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
@@ -57,10 +57,10 @@ func hoverExpression(n *tree_sitter.Node) *tree_sitter.Node {
 	}
 	return n
 }
-func valueHover(r *benthos.PartialResult, n *tree_sitter.Node) *protocol.Hover {
-	body := fmt.Sprintf("```json\n%s\n```", prettyResult(r.Full))
+func (h *Handler) valueHover(uri protocol.DocumentURI, r *benthos.PartialResult, n *tree_sitter.Node) *protocol.Hover {
+	body := h.previewMarkdown(uri, r.Full)
 	if r.Deleted {
-		body = "`deleted()` — message filtered"
+		body = "`deleted()` — deletion marker (removes a field or filters a message, depending on assignment)"
 	}
 	return &protocol.Hover{Contents: protocol.NewHoverContents(protocol.Markdown, body), Range: &protocol.Range{Start: protocol.Position{Line: int(n.StartPosition().Row), Character: int(n.StartPosition().Column)}, End: protocol.Position{Line: int(n.EndPosition().Row), Character: int(n.EndPosition().Column)}}}
 }
