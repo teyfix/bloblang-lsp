@@ -59,3 +59,11 @@ func TestInputDirectiveCompletedClearsErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectiveWithoutMappingIsValidEditorState(t *testing.T) {
+	h, uri := featureHandler(t)
+	text := `#!input {"foo":"bar"}`
+	openFeature(t, h, uri, text)
+	require.Empty(t, h.diagnosticsText(uri, text))
+	require.NotNil(t, h.getSample(uri))
+}

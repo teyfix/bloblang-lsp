@@ -225,7 +225,18 @@ func (h *Handler) importHintDiagnostics(uri protocol.DocumentURI, text string) [
 
 func (h *Handler) diagnosticsText(uri protocol.DocumentURI, text string) []protocol.Diagnostic {
 	diagnostics := []protocol.Diagnostic{}
-	if text != "" {
+	hasCode := true
+	if tree, e := h.parser.Parse(string(uri)+":diagnostic-code", text); e == nil && tree != nil {
+		hasCode = false
+		for i := uint(0); i < tree.RootNode().NamedChildCount(); i++ {
+			if tree.RootNode().NamedChild(i).Kind() != "comment" {
+				hasCode = true
+				break
+			}
+		}
+		tree.Close()
+	}
+	if text != "" && hasCode {
 		env := h.benv.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
 		if _, err := env.Parse(text); err != nil {
 			diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)

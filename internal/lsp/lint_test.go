@@ -57,3 +57,18 @@ func TestLintConfigAndSafeQuickFix(t *testing.T) {
 	require.NoError(t, e)
 	require.Empty(t, actions)
 }
+
+func TestLintSemanticGuards(t *testing.T) {
+	h, uri := featureHandler(t)
+	require.Zero(t, lintCodes(h, uri, "let dir = env(\"ARTIFACT_DIR\")\nroot = if $dir == null { throw(\"required\") } else { $dir }")["correctness/environment/require-fallback"])
+	require.Positive(t, lintCodes(h, uri, `root = env("A") | env("B")`)["correctness/environment/require-fallback"])
+	require.Zero(t, lintCodes(h, uri, "if true {\nroot.a = 1\nroot.b = 2\nroot.c = 3\n}")["style/assignments/prefer-grouped"])
+	ds := h.lintDiagnostics(uri, "root.a = 1\n# comment\nroot.b = 2\nroot.c = 3\nroot.d = 4")
+	found := false
+	for _, d := range ds {
+		if strings.Contains(d.Message, "assign") {
+			found = true
+		}
+	}
+	require.True(t, found)
+}

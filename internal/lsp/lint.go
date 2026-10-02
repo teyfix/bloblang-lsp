@@ -155,11 +155,38 @@ func (h *Handler) lintFindings(uri protocol.DocumentURI, text string) []lintFind
 				}
 				if p.Kind() == "binary_expr" {
 					op := nodeText(p.ChildByFieldName("operator"), text)
-					if op == "|" || op == "==" || op == "!=" {
+					if (op == "|" && p.ChildByFieldName("left") != nil && p.ChildByFieldName("left").StartByte() <= n.StartByte() && p.ChildByFieldName("left").EndByte() >= n.EndByte()) || op == "==" || op == "!=" {
 						handled = true
 					}
 				}
 				current = p
+			}
+			if !handled {
+				binding := n
+				for binding != nil && binding.Kind() != "let_assignment" && !benthosStatement(binding.Kind()) {
+					binding = binding.Parent()
+				}
+				if binding != nil && binding.Kind() == "let_assignment" {
+					name := binding.ChildByFieldName("name")
+					for i := range ss {
+						r := &ss[i]
+						if r.declaration || r.kind != "variable" {
+							continue
+						}
+						d := visibleDefinition(ss, r)
+						if d == nil || name == nil || d.node.Id() != name.Id() {
+							continue
+						}
+						for p := r.node.Parent(); p != nil && !benthosStatement(p.Kind()); p = p.Parent() {
+							if p.Kind() == "binary_expr" {
+								op := nodeText(p.ChildByFieldName("operator"), text)
+								if (op == "==" || op == "!=") && (nodeText(p.ChildByFieldName("left"), text) == "null" || nodeText(p.ChildByFieldName("right"), text) == "null") {
+									handled = true
+								}
+							}
+						}
+					}
+				}
 			}
 			if !handled {
 				add("correctness/environment/require-fallback", "An unset env() returns null; provide .or(default), .or(throw(...)), or .not_null().catch(...).", n, "")
@@ -207,7 +234,7 @@ func (h *Handler) lintFindings(uri protocol.DocumentURI, text string) []lintFind
 				keys = append(keys, k)
 			}
 			if good && len(keys) > 0 {
-				add("style/objects/prefer-with", "Consider "+receiver+".with(...). Missing fields are omitted by with(), while this object retains null values; verify that distinction.", n, "")
+				add("style/objects/prefer-with", "Consider "+receiver+".with(...). Missing fields are omitted by with(), while this object retains null values; verify that distinction and receiver evaluation/errors.", n, "")
 			}
 		}
 		if n.Kind() == "binary_expr" {
@@ -226,14 +253,22 @@ func (h *Handler) lintFindings(uri protocol.DocumentURI, text string) []lintFind
 		// Analyze uninterrupted runs using direct AST statement siblings; comments stop runs.
 		if n.Kind() == "source" || n.Kind() == "statement_block" {
 			var run []*tree_sitter.Node
-			seeded := n.Kind() != "source"
-			if sample := h.getSample(uri); sample != nil && sample.HasRoot {
+			seeded := false
+			unknownState := n.Kind() != "source"
+			if sample := h.getSample(uri); sample != nil && sample.HasRoot && n.Kind() == "source" {
 				seeded = true
 			}
 			flush := func() {
 				minimum := cfg.Setting("style/assignments/prefer-grouped").MinAssignments
 				if minimum < 3 {
 					minimum = 3
+				}
+				if unknownState && !seeded {
+					if len(run) > 0 {
+						seeded = true
+					}
+					run = nil
+					return
 				}
 				if len(run) < minimum {
 					if len(run) > 0 {

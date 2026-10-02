@@ -40,6 +40,20 @@ func (h *Handler) formatText(uri protocol.DocumentURI, text string, tabSize int)
 	if err != nil || tree == nil {
 		return text, false
 	}
+	expressionOnly := false
+	if tree.RootNode().HasError() && originalErr == nil {
+		wrapped, e := h.parser.Parse(string(uri)+":format-expression", "root = "+text)
+		if e == nil && wrapped != nil {
+			if !wrapped.RootNode().HasError() {
+				tree.Close()
+				tree = wrapped
+				text = "root = " + text
+				expressionOnly = true
+			} else {
+				wrapped.Close()
+			}
+		}
+	}
 	defer tree.Close()
 	if tree.RootNode().HasError() {
 
@@ -56,39 +70,23 @@ func (h *Handler) formatText(uri protocol.DocumentURI, text string, tabSize int)
 	if tabSize > 8 {
 		tabSize = 8
 	}
-	indent := 0
-	var out strings.Builder
-	prev := ""
-	var end uint
-	for _, t := range ts {
-		gap := text[end:t.start]
-		newlines := strings.Count(gap, "\n")
-		if t.text == "}" || t.text == "]" || t.text == ")" {
-			if indent > 0 {
-				indent--
-			}
-		}
-		if newlines > 0 {
-			if newlines > 2 {
-				newlines = 2
-			}
-			out.WriteString(strings.Repeat("\n", newlines))
-			out.WriteString(strings.Repeat(" ", indent*tabSize))
-		} else if out.Len() > 0 && formatSpace(prev, t.text) {
-			out.WriteByte(' ')
-		}
-		out.WriteString(t.text)
-		if t.text == "{" || t.text == "[" || t.text == "(" {
-			indent++
-		}
-		end = t.end
-		prev = t.text
+	result := renderLayout(nodeLayout(tree.RootNode(), []byte(text), tabSize), h.workspaceConfig(uri).Formatter.PrintWidth) + "\n"
+	check, checkErr := h.parser.Parse(string(uri)+":formatted", result)
+	if checkErr != nil || check == nil {
+		return text, false
 	}
-	result := out.String() + "\n"
+	hasError := check.RootNode().HasError()
+	check.Close()
+	if hasError {
+		return text, false
+	}
 	// Reparse the formatted result before returning an edit.
 	if _, err := env.Parse(result); err != nil && originalErr == nil {
 
 		return text, false
+	}
+	if expressionOnly {
+		result = strings.TrimPrefix(result, "root = ")
 	}
 	return result, true
 }
@@ -138,17 +136,38 @@ func (h *Handler) Formatting(_ context.Context, p *protocol.DocumentFormattingPa
 				continue
 			}
 			var replacement string
-			if r.style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
-				indent := r.indent + 2 // key column is the scalar header column; content indentation comes from first mapped byte.
-				if len(r.offsets) > 0 {
+			if r.style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 || strings.Contains(strings.TrimSuffix(formatted, "\n"), "\n") {
+				indent := r.keyIndent + 2
+				indicatorColumn := bytePosition(text, r.start).Character
+				if indicatorColumn <= len(strings.Split(text, "\n")[bytePosition(text, r.start).Line])-len(strings.TrimLeft(strings.Split(text, "\n")[bytePosition(text, r.start).Line], " ")) {
+					indent = max(indent, indicatorColumn+2)
+				} // key column is the scalar header column; content indentation comes from first mapped byte.
+				if len(r.offsets) > 0 && r.style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
 					pos := bytePosition(text, r.offsets[0])
 					indent = pos.Character
 				}
 				body := strings.TrimSuffix(formatted, "\n")
 				replacement = "|-\n" + strings.Repeat(" ", indent) + strings.ReplaceAll(body, "\n", "\n"+strings.Repeat(" ", indent)) + "\n"
+				if r.style&(yaml.LiteralStyle|yaml.FoldedStyle) == 0 {
+					replacement = strings.TrimSuffix(replacement, "\n")
+				}
 			} else {
 				b, _ := json.Marshal(strings.TrimSuffix(formatted, "\n"))
 				replacement = string(b)
+				if r.style&yaml.SingleQuotedStyle != 0 {
+					replacement = "'" + strings.ReplaceAll(strings.TrimSuffix(formatted, "\n"), "'", "''") + "'"
+				}
+				if r.style == 0 && !strings.Contains(strings.TrimSuffix(formatted, "\n"), "\n") {
+					replacement = strings.TrimSuffix(formatted, "\n")
+				}
+			}
+			var candidate yaml.Node
+			if yaml.Unmarshal([]byte(text[:r.start]+replacement+text[r.end:]), &candidate) != nil {
+				b, _ := json.Marshal(strings.TrimSuffix(formatted, "\n"))
+				replacement = string(b)
+				if yaml.Unmarshal([]byte(text[:r.start]+replacement+text[r.end:]), &candidate) != nil {
+					continue
+				}
 			}
 			if replacement == text[r.start:r.end] {
 				continue

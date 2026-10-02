@@ -86,3 +86,49 @@ BLOBLANG_CORPUS_LIST=/path/to/newline-delimited-files.txt go test ./internal/lsp
 ```
 
 The server implements full document sync, completion, hover, formatting, definition, references, diagnostics, inlay hints and code lenses. Configuration uses `.bloblangrc` and `BLOBLANG_LSP_*` variables; see `internal/config/config.go`. Both CLI entrypoints write logs to stderr and speak LSP on stdin/stdout.
+
+## Workspace formatting, previews and linting
+
+Each workspace root can contain `.bloblangrc.json`. Multi-root workspaces use the longest matching root; standalone documents use their parent directory. Edits, creation and deletion take effect without restarting. Invalid settings fall back to defaults and the bundled VS Code schema reports invalid keys or values.
+
+```json
+{
+  "formatter": { "printWidth": 80 },
+  "preview": { "format": "yaml" },
+  "lint": {
+    "enabled": true,
+    "rules": {
+      "correctness/environment/require-fallback": "warn",
+      "correctness/variables/no-unused-let": "warn",
+      "style/assignments/prefer-grouped": { "severity": "warn", "minAssignments": 3 },
+      "style/objects/prefer-with": "hint",
+      "style/objects/prefer-without": "warn",
+      "style/objects/combine-without": "warn",
+      "style/arrays/prefer-any": "hint"
+    }
+  }
+}
+```
+
+Rule keys stay flat for autocomplete. All rules accept `off`, `hint`, `info`, `warn` or `error`, either as a string or an object with `severity`. `minAssignments` is specific to grouped assignments. Metadata, defaults and schema properties live in `internal/editorconfig`; regenerate the bundled schema with `go run ./cmd/config-schema > schemas/bloblangrc.schema.json`.
+
+The formatter preserves tokens, comments, string contents and explicit parentheses. It collapses short expression groups, expands longer groups, and verifies its output with Tree-sitter and Benthos before offering edits. YAML mappings preserve short scalar styles where valid; multiline output uses literal blocks. Formatting does not apply lint refactors.
+
+Hover values, inlay tooltips and Show Output share YAML previews by default. Set `preview.format` to `json` for compact JSON. Both use `formatter.printWidth`; inline labels have their own size limit. An unset `env()` is null, so `.catch(...)` alone does not satisfy the environment rule. Use `.or(default)`, `.or(throw("required"))`, or `.not_null().catch(throw("required"))`.
+
+Lint suggestions account for object merge/replacement, missing fields and effectful evaluation. Grouped assignments, projections, deletion and existence checks are advisory. Consecutive `.without()` calls with literal arguments have an explicit Quick Fix. No automatic Fix All is advertised.
+
+```bloblang
+# bloblang-lint-disable-next-line correctness/environment/require-fallback -- optional value
+root.optional = env("OPTIONAL")
+```
+
+Inline YAML mappings are numbered in document order from 001, excluding interpolation and external `from` mappings. An immediately adjacent comment at the mapping key's indentation selects a sample explicitly:
+
+```yaml
+# bloblang-sample: selected.sample.json
+check: |
+  !errored()
+```
+
+Selection prefers that path, then `config.sample-001.json` (also `.yaml` or `.yml`), then shared `config.sample.json`. The `$bloblang` envelope applies to every sample file. Missing explicit files are errors; missing automatic samples remain informational and leave static features usable.

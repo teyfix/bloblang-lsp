@@ -247,7 +247,7 @@ func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionPar
 	return &protocol.CompletionList{Items: items}, nil
 }
 
-func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (hover *protocol.Hover, err error) {
 	uri := params.TextDocument.URI
 	if yamlDocument(uri) && !strings.Contains(string(uri), "#bloblang-") {
 		r, pos, ok := h.regionAt(uri, params.Position)
@@ -258,20 +258,6 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 		cp.TextDocument.URI = r.uri
 		cp.Position = pos
 		v, err := h.Hover(ctx, &cp)
-		if v != nil && v.Range != nil {
-			localTree, e := h.parser.Parse(string(r.uri)+":range", r.text)
-			if e == nil && localTree != nil {
-				if localTree.RootNode().HasError() {
-					if v.Range.Start.Line == 0 {
-						v.Range.Start.Character = max(0, v.Range.Start.Character-7)
-					}
-					if v.Range.End.Line == 0 {
-						v.Range.End.Character = max(0, v.Range.End.Character-7)
-					}
-				}
-				localTree.Close()
-			}
-		}
 		if v != nil && v.Range != nil {
 			host, _ := h.documents.Text(uri)
 			*v.Range = r.hostRange(host, *v.Range)
@@ -291,6 +277,17 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 		return nil, nil
 	}
 
+	wrappedExpression := false
+	defer func() {
+		if wrappedExpression && hover != nil && hover.Range != nil {
+			if hover.Range.Start.Line == 0 {
+				hover.Range.Start.Character = max(0, hover.Range.Start.Character-7)
+			}
+			if hover.Range.End.Line == 0 {
+				hover.Range.End.Character = max(0, hover.Range.End.Character-7)
+			}
+		}
+	}()
 	if tree.RootNode().HasError() && strings.Contains(string(uri), "#bloblang-") {
 		wrapped, e := h.parser.Parse(string(uri)+":expression", "root = "+text)
 		if e == nil && wrapped != nil {
@@ -298,6 +295,7 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*pro
 				tree.Close()
 				tree = wrapped
 				text = "root = " + text
+				wrappedExpression = true
 				if lineIdx == 0 {
 					col += 7
 				}
