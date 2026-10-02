@@ -1,0 +1,189 @@
+package lsp
+
+import (
+	"context"
+	"encoding/json"
+	"go.yaml.in/yaml/v3"
+	"os"
+	"path/filepath"
+	"strings"
+
+	protocol "github.com/owenrumney/go-lsp/lsp"
+	"github.com/teyfix/bloblang-lsp/internal/benthos"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
+)
+
+type formatToken struct {
+	text       string
+	start, end uint
+}
+
+func tokens(n *tree_sitter.Node, source []byte, out *[]formatToken) {
+	switch n.Kind() {
+	case "string", "comment", "number":
+		*out = append(*out, formatToken{n.Utf8Text(source), n.StartByte(), n.EndByte()})
+		return
+	}
+	if n.ChildCount() == 0 {
+		if n.EndByte() > n.StartByte() {
+			*out = append(*out, formatToken{n.Utf8Text(source), n.StartByte(), n.EndByte()})
+		}
+		return
+	}
+	for i := uint(0); i < n.ChildCount(); i++ {
+		tokens(n.Child(i), source, out)
+	}
+}
+func (h *Handler) formatText(uri protocol.DocumentURI, text string, tabSize int) (string, bool) {
+	preview, err := benthos.PreviewEnvironment(h.benv, h.getSample(uri))
+	if err != nil {
+		return text, false
+	}
+	env := preview.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
+	_, originalErr := env.Parse(text)
+	tree, err := h.parser.Parse(string(uri)+":format", text)
+	if err != nil || tree == nil {
+		return text, false
+	}
+	expressionOnly := false
+	if tree.RootNode().HasError() && originalErr == nil {
+		wrapped, e := h.parser.Parse(string(uri)+":format-expression", "root = "+text)
+		if e == nil && wrapped != nil {
+			if !wrapped.RootNode().HasError() {
+				tree.Close()
+				tree = wrapped
+				text = "root = " + text
+				expressionOnly = true
+			} else {
+				wrapped.Close()
+			}
+		}
+	}
+	defer tree.Close()
+	if tree.RootNode().HasError() {
+
+		return text, false
+	}
+	var ts []formatToken
+	tokens(tree.RootNode(), []byte(text), &ts)
+	if len(ts) == 0 {
+		return text, true
+	}
+	if tabSize <= 0 {
+		tabSize = 2
+	}
+	if tabSize > 8 {
+		tabSize = 8
+	}
+	result := renderLayout(nodeLayout(tree.RootNode(), []byte(text), tabSize), h.workspaceConfig(uri).Formatter.PrintWidth) + "\n"
+	check, checkErr := h.parser.Parse(string(uri)+":formatted", result)
+	if checkErr != nil || check == nil {
+		return text, false
+	}
+	hasError := check.RootNode().HasError()
+	check.Close()
+	if hasError {
+		return text, false
+	}
+	// Reparse the formatted result before returning an edit.
+	if _, err := env.Parse(result); err != nil && originalErr == nil {
+
+		return text, false
+	}
+	if expressionOnly {
+		result = strings.TrimPrefix(result, "root = ")
+	}
+	return result, true
+}
+func formatSpace(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if strings.HasPrefix(b, "#") {
+		return true
+	}
+	if b == "." || a == "." || a == "$" || a == "@" || a == "!" || b == "," || b == ":" || b == ")" || b == "]" {
+		return false
+	}
+	if b == "(" {
+		if a == "if" || a == "match" {
+			return true
+		}
+		return !validIdentifier(a)
+	}
+	if a == "(" || a == "[" {
+		return false
+	}
+	if a == "{" && b == "}" {
+		return false
+	}
+	if a == ":" || a == "," {
+		return true
+	}
+	if b == "}" || a == "{" {
+		return true
+	}
+	return true
+}
+func (h *Handler) Formatting(_ context.Context, p *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	text, ok := h.documents.Text(p.TextDocument.URI)
+	if !ok {
+		return []protocol.TextEdit{}, nil
+	}
+	if yamlDocument(p.TextDocument.URI) && !strings.Contains(string(p.TextDocument.URI), "#bloblang-") {
+		var edits []protocol.TextEdit
+		for _, r := range h.regions(p.TextDocument.URI) {
+			if r.interpolation {
+				continue
+			}
+			formatted, valid := h.formatText(r.uri, r.text, p.Options.TabSize)
+			if !valid || formatted == r.text {
+				continue
+			}
+			var replacement string
+			if r.style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 || strings.Contains(strings.TrimSuffix(formatted, "\n"), "\n") {
+				indent := r.keyIndent + 2
+				indicatorColumn := bytePosition(text, r.start).Character
+				if indicatorColumn <= len(strings.Split(text, "\n")[bytePosition(text, r.start).Line])-len(strings.TrimLeft(strings.Split(text, "\n")[bytePosition(text, r.start).Line], " ")) {
+					indent = max(indent, indicatorColumn+2)
+				} // key column is the scalar header column; content indentation comes from first mapped byte.
+				if len(r.offsets) > 0 && r.style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+					pos := bytePosition(text, r.offsets[0])
+					indent = pos.Character
+				}
+				body := strings.TrimSuffix(formatted, "\n")
+				replacement = "|-\n" + strings.Repeat(" ", indent) + strings.ReplaceAll(body, "\n", "\n"+strings.Repeat(" ", indent)) + "\n"
+				if r.style&(yaml.LiteralStyle|yaml.FoldedStyle) == 0 {
+					replacement = strings.TrimSuffix(replacement, "\n")
+				}
+			} else {
+				b, _ := json.Marshal(strings.TrimSuffix(formatted, "\n"))
+				replacement = string(b)
+				if r.style&yaml.SingleQuotedStyle != 0 {
+					replacement = "'" + strings.ReplaceAll(strings.TrimSuffix(formatted, "\n"), "'", "''") + "'"
+				}
+				if r.style == 0 && !strings.Contains(strings.TrimSuffix(formatted, "\n"), "\n") {
+					replacement = strings.TrimSuffix(formatted, "\n")
+				}
+			}
+			var candidate yaml.Node
+			if yaml.Unmarshal([]byte(text[:r.start]+replacement+text[r.end:]), &candidate) != nil {
+				b, _ := json.Marshal(strings.TrimSuffix(formatted, "\n"))
+				replacement = string(b)
+				if yaml.Unmarshal([]byte(text[:r.start]+replacement+text[r.end:]), &candidate) != nil {
+					continue
+				}
+			}
+			if replacement == text[r.start:r.end] {
+				continue
+			}
+			edits = append(edits, protocol.TextEdit{Range: protocol.Range{Start: bytePosition(text, r.start), End: bytePosition(text, r.end)}, NewText: replacement})
+		}
+		return edits, nil
+	}
+	formatted, valid := h.formatText(p.TextDocument.URI, text, p.Options.TabSize)
+	if !valid || formatted == text {
+		return []protocol.TextEdit{}, nil
+	}
+	return []protocol.TextEdit{{Range: protocol.Range{Start: protocol.Position{}, End: bytePosition(text, len(text))}, NewText: formatted}}, nil
+}

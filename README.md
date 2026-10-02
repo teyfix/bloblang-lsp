@@ -1,135 +1,149 @@
 # Bloblang Language Server
 
-A [Language Server Protocol (LSP)](https://microsoft.github.io/language-server-protocol/) implementation for [Bloblang](https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/), the powerful mapping language used in [Redpanda Connect](https://docs.redpanda.com/redpanda-connect/).
+A single Go LSP binary for Bloblang and mappings embedded in Redpanda Connect YAML. The VS Code extension in `../vscode-bloblang` bundles this binary and supplies language highlighting.
 
-## Features
+## Editor features
 
-- **Intelligent Code Completion** — Auto-complete Bloblang functions and methods with contextual awareness
-  - Function completions triggered after operators like `=`, `(`, `{`, `[`, `|`, `;`
-  - Method completions triggered after `.` (e.g., `this.foo.bar.`)
-  - Named-argument variants for functions/methods with optional parameters
-  - Visual status indicators: `[β]` beta, `[⚗]` experimental, `[⚠]` deprecated
+- Benthos syntax and semantic diagnostics, plus nonblocking sample problems.
+- Formatting that preserves tokens, comments and string content; malformed syntax is left unchanged.
+- Function and method documentation, sampled field/expression values, before-assignment `root` previews, and output inlay tooltips.
+- Definition and references for local variables and named maps (including literal `.apply("name")` calls), import paths and YAML `mapping: from "path"` links.
+- Function/method snippets, local variable/metadata completion, and sampled receiver guidance. Method filtering applies only when a valid sample yields a reliable receiver value; otherwise all static completions remain available.
+- YAML literal, folded, plain and quoted mappings under `mapping`, `request_map`, `result_map`, `args_mapping`, `fields_mapping`, `check` and `bloblang`, plus `${! ... }` expressions. Host YAML formatting is preserved; use the extension's explicit **Format Embedded Mappings** command.
 
-- **Rich Hover Documentation** — Detailed Markdown documentation on hover
-  - Function/method signatures with parameter types
-  - Status badges and deprecation warnings
-  - Inline examples with input/output tables
-  - Links to official [Redpanda documentation](https://docs.redpanda.com/redpanda-connect/guides/bloblang/)
+Each embedded mapping is evaluated independently. A sample describes that mapping's input; the server does not infer intermediate processor inputs from a pipeline. Hover inside reached `if` branches retains branch conditions and preceding statements. Named maps and per-element/lambda contexts with no selected invocation do not show invented runtime values.
 
-- **Real-time Diagnostics** — Live error detection and validation
-  - Parse error reporting with line/character positioning
-  - Custom import resolution for `import "./maps.blobl"` statements
-  - Diagnostics published via LSP `textDocument/publishDiagnostics`
+## Samples
 
-- **Snippet Support** — Tab-stop placeholders for rapid coding
-  - Positional arguments for required parameters
-  - Named arguments for optional parameters
-  - Smart defaults (e.g., `0` for numbers, `[]` for arrays)
+For `mapping.blobl`, the default is a sibling `mapping.sample.json`, `.yaml` or `.yml`. Files must have a `$bloblang` envelope:
 
-## Installation
-
-### Pre-built Binaries
-
-Download the latest release for your platform from the [Releases](https://github.com/teyfix/bloblang-lsp/releases) page:
-
-| Platform | Architectures |
-|----------|--------------|
-| Linux    | amd64, arm64 |
-| macOS    | amd64, arm64 |
-| Windows  | amd64, arm64 |
-
-### From Source
-
-Requires [Go](https://go.dev/) 1.26+ and [Task](https://taskfile.dev/):
-
-```bash
-git clone https://github.com/teyfix/bloblang-lsp.git
-cd bloblang-lsp
-task build
+```json
+{"$bloblang":{"input":{"name":"Ada"},"meta":{"topic":"people"}}}
 ```
 
-The binary will be available at `target/language-server-<os>-<arch>`.
-
-## Editor Configuration
-
-### Neovim (nvim-lspconfig)
-
-```lua
-require'lspconfig'.bloblang.setup{
-  cmd = { '/path/to/language-server-linux-amd64' },
-  filetypes = { 'bloblang', 'blobl' },
-  root_dir = require'lspconfig'.util.root_pattern('.git', 'Taskfile.yml'),
-}
+```yaml
+$bloblang:
+  input:
+    name: Ada
+  meta:
+    topic: people
 ```
 
-### Emacs (lsp-mode)
+`input` is required and may be `null`. `meta` is optional and must be an object. Multiple siblings are ambiguous; select an entire sample explicitly. Missing default files produce an Information issue suggesting a sample; missing explicit files, malformed samples and bad directives produce Error issues. These issues disable dynamic previews and leave static diagnostics, formatting, completions and navigation available.
 
-```elisp
-(lsp-register-client
- (make-lsp-client :new-connection (lsp-stdio-connection "/path/to/language-server-linux-amd64")
-                  :major-modes '(bloblang-mode)
-                  :server-id 'bloblang-lsp))
+Leading comment directives are dispatched through an internal handler registry:
+
+```bloblang
+#!input {"name":"Ada"}
+#!meta {"topic":"people"}
+root.name = this.name.uppercase()
 ```
 
-### Sublime Text (LSP)
+`#!sample {input: {name: Ada}, meta: {topic: people}}` supplies an entire inline sample, without the `$bloblang` envelope. It overrides automatic sibling discovery, including invalid or ambiguous default files. Partial `input` and `meta` directives override their fields in a valid default sample, in document order.
+
+`input_from`, `meta_from`, `sample_from` and `root_from` load JSON/YAML files. **Every `_from` file requires the `$bloblang` envelope**; each handler extracts its corresponding field. Paths resolve relative to the mapping or host YAML file. Sample/import changes refresh open mappings.
+
+Multiline bodies remain valid Bloblang comments:
+
+```bloblang
+#!sample |
+#| input:
+#|   name: Ada
+#| meta:
+#|   topic: people
+root.name = this.name
+```
+
+A body ends when `#|` continuation lines end. Empty arguments, unknown directives and duplicate directive names are errors at the header. Directives belong before mapping statements.
+
+For `result_map` overlays, optional `$bloblang.root` or `#!root` seeds a separate output target. This selects Benthos `BloblangMutateFrom`, while `this` continues to read `input`:
+
+```bloblang
+#!input {"result":{"video":"ready"}}
+#!root {"provider_file_ref":"video"}
+root.status = this.result.get(root.provider_file_ref)
+```
+
+Metadata enters a public `service.Message`, so `meta("topic")` and `@topic` work. Metadata assignments update preview output metadata. Each prefix starts from a fresh sample. The first assignment's left-hand `root` tooltip shows the input (or explicit target); later left-hand tooltips show the prior prefix output. Right-hand `root` follows Benthos's current output semantics and can be uninitialized before the first assignment. `this` retains the input within that mapping.
+
+IDE validation and sample execution use an isolated `env()` resolver: a whole sample's optional `env` object supplies explicit string values, and every unspecified name evaluates to `""`. The resolver never reads or changes the language server's process environment. This keeps concatenations such as `"email=" + env("MIXDROP_API_EMAIL")` evaluable in the editor. Real Bloblang still returns null for unset variables, so the environment fallback lint warning remains.
+
+```yaml
+$bloblang:
+  input:
+    provider_file_ref: fixture-ref
+  env:
+    MIXDROP_API_EMAIL: example@example.test
+    SUBTITLE_FILE: /tmp/fixture.srt
+```
+
+Use fixture values in these overrides. They apply to whole samples loaded automatically, through `#!sample_from`, or inline through `#!sample {input: ..., env: {...}}`. Empty placeholders can take different `.or(...)`, `.catch(...)`, or null-check paths from the real runtime; previews are not a substitute for production validation.
+
+Migration from the old sample syntax: change `#!sample {"name":"Ada"}` to `#!input {"name":"Ada"}`, or `#!sample {"input":{"name":"Ada"}}`. Wrap old raw sample files under `$bloblang.input`.
+
+## Build and package
+
+Requires Go 1.26.3+ and a C compiler. The grammar is pinned to a published Go module commit, so builds work from this repository alone. Tree-sitter's Go binding uses generated C; release binaries need no source checkout or compiler at runtime.
+
+```sh
+go test ./...
+go build -a -o target/bloblang-lsp ./cmd/bloblang-lsp
+```
+
+To develop against the sibling grammar, use `go mod edit -replace github.com/teyfix/tree-sitter-bloblang=../tree-sitter-bloblang` locally and remove that replacement before committing. Use `-a` after regenerating its grammar: the included `parser.c` lives outside the Go package directory and Go's normal package cache can miss the change.
+
+Tagged releases publish `bloblang-lsp-<os>-<arch>` binaries (`.exe` on Windows) and `SHA256SUMS` for Linux, macOS and Windows on amd64 and arm64. The VS Code extension downloads the latest release for its host platform and verifies the checksum. A configured external binary can also be used for development.
+
+To verify a private mapping corpus without changing files:
+
+```sh
+BLOBLANG_CORPUS_LIST=/path/to/newline-delimited-files.txt go test ./internal/lsp -run TestFormatterCorpus -v
+```
+
+The server implements full document sync, completion, hover, formatting, definition, references, diagnostics, inlay hints, code lenses and lint Quick Fixes. Both CLI entrypoints write logs to stderr and speak LSP on stdin/stdout. Workspace editor settings use `.bloblangrc.json` as shown below. Legacy server startup settings use the `.bloblangrc` base name with supported extensions (for example `.bloblangrc.yaml`) and `BLOBLANG_LSP_*` overrides; see [configuration](docs/core/settings.md). Startup settings require restarting and do not set preview print width.
+
+## Workspace formatting, previews and linting
+
+Each workspace root can contain `.bloblangrc.json`. Multi-root workspaces use the longest matching root; standalone documents use their parent directory. Edits, creation and deletion take effect without restarting. Invalid settings fall back to defaults and the bundled VS Code schema reports invalid keys or values.
 
 ```json
 {
-  "clients": {
-    "bloblang-lsp": {
-      "enabled": true,
-      "command": ["/path/to/language-server-linux-amd64"],
-      "selector": "source.bloblang"
+  "formatter": { "printWidth": 80 },
+  "preview": { "format": "yaml" },
+  "lint": {
+    "enabled": true,
+    "rules": {
+      "correctness/environment/require-fallback": "warn",
+      "correctness/variables/no-unused-let": "warn",
+      "style/assignments/prefer-grouped": { "severity": "warn", "minAssignments": 3 },
+      "style/objects/prefer-with": "hint",
+      "style/objects/prefer-without": "warn",
+      "style/objects/combine-without": "warn",
+      "style/arrays/prefer-any": "hint"
     }
   }
 }
 ```
 
-## Supported LSP Capabilities
+See the [generated rule reference](docs/features/lint-rules.md) for defaults and fix availability. Rule keys stay flat for autocomplete. All rules accept `off`, `hint`, `info`, `warn` or `error`, either as a string or an object with `severity`. `minAssignments` is specific to grouped assignments. Metadata, defaults and schema properties live in `internal/editorconfig`; regenerate the bundled schema with `go run ./cmd/config-schema > schemas/bloblangrc.schema.json`.
 
-| Feature | Method | Status |
-|---------|--------|--------|
-| Text Document Sync | `textDocument/didOpen` | ✅ Full document sync |
-| | `textDocument/didChange` | ✅ |
-| | `textDocument/didClose` | ✅ |
-| Completion | `textDocument/completion` | ✅ Functions, methods, variables |
-| Hover | `textDocument/hover` | ✅ Function/method docs |
-| Diagnostics | `textDocument/publishDiagnostics` | ✅ Parse errors |
+The formatter preserves tokens, comments, string contents and explicit parentheses. It collapses short expression groups, expands longer groups, and verifies its output with Tree-sitter and Benthos before offering edits. YAML mappings preserve short scalar styles where valid; multiline output uses literal blocks. Formatting does not apply lint refactors.
 
-## Architecture
+Hover values, inlay tooltips and Show Output share YAML previews by default. Set `preview.format` to `json` for compact JSON. Both use `formatter.printWidth`; inline labels have their own size limit. An unset `env()` is null, so `.catch(...)` alone does not satisfy the environment rule. Use `.or(default)`, `.or(throw("required"))`, or `.not_null().catch(throw("required"))`.
 
-The server is built on:
+Lint suggestions account for object merge/replacement, missing fields and effectful evaluation. Grouped assignments, projections, deletion and existence checks are advisory. Consecutive `.without()` calls with literal arguments have an explicit Quick Fix. The server does not implement `source.fixAll`; formatting does not apply lint refactors. See [lint behavior and fixes](docs/features/lint.md).
 
-- **[glsp](https://github.com/tliron/glsp)** — Go LSP framework
-- **[Redpanda Connect](https://github.com/redpanda-data/connect)** — Bloblang parser and runtime
-- **[Benthos](https://github.com/redpanda-data/benthos)** — Core Bloblang environment
-
-## Development
-
-```bash
-# Build for current platform
-task build:target OS=linux ARCH=amd64
-
-# Build all platforms
-task build
-
-# Run tests
-go test ./...
-
-# Release (requires GitHub token)
-git tag v1.0.0
-git push origin v1.0.0
+```bloblang
+# bloblang-lint-disable-next-line correctness/environment/require-fallback -- optional value
+root.optional = env("OPTIONAL")
 ```
 
-## Contributing
+Inline YAML mappings are numbered in document order from 001, excluding interpolation and external `from` mappings. An immediately adjacent comment at the mapping key's indentation selects a sample explicitly:
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+```yaml
+# bloblang-sample: selected.sample.json
+check: |
+  !errored()
+```
 
-## License
-
-[MIT](LICENSE)
-
-## Acknowledgments
-
-- [Redpanda Data](https://redpanda.com/) for the excellent Bloblang language and documentation
-- The [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) team at Microsoft
+Selection prefers that path, then `config.sample-001.json` (also `.yaml` or `.yml`), then shared `config.sample.json`. The `$bloblang` envelope applies to every sample file. Missing explicit files are errors; missing automatic samples remain informational and leave static features usable.

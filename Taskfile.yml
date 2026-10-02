@@ -1,18 +1,20 @@
 version: 3
 
 vars:
+  CGO_ENABLED: 1
   TARGET_DIR: target
   VERSION:
     sh: test -n "${VERSION}" && echo "${VERSION}"
   LD_FLAGS: '{{default "-w -s" .LD_FLAGS}}'
+  GO_TAGS: '{{default "" .GO_TAGS}}'
   DATE_BUILT: '{{now | date "2006-01-02T15:04:05Z"}}'
-  GO_BUILD_CMD: go build {{.GO_FLAGS}} -trimpath -tags "{{.TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version={{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
+  GO_BUILD_CMD: go build {{.GO_FLAGS}} -trimpath -tags "{{.GO_TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version={{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
 
 tasks:
   build:
     desc: Build language server
     env:
-      CGO_ENABLED: 0
+      CGO_ENABLED: "{{.CGO_ENABLED}}"
     vars:
       COMPRESS: '{{ default true .COMPRESS }}'
     deps:
@@ -26,18 +28,18 @@ tasks:
   build:target:
     desc: Build language server for a specific OS and architecture
     env:
-      CGO_ENABLED: 0
+      CGO_ENABLED: "{{.CGO_ENABLED}}"
     preconditions:
       - sh: test -n "{{.OS}}"
         msg: Required build variable OS is not set
       - sh: test -n "{{.ARCH}}"
         msg: Required build variable ARCH is not set
     vars:
-      BIN: "language-server-{{.VERSION}}-{{.OS}}-{{.ARCH}}"
+      BIN: '{{default (printf "language-server-%s-%s-%s" .VERSION .OS .ARCH) .BIN}}'
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
       COMPRESS: '{{ default true .COMPRESS }}'
     cmds:
-      - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/cli/main.go"
+      - cmd: "GOOS={{.OS}} GOARCH={{.ARCH}} {{.GO_BUILD_CMD}} -o {{.TARGET_DIR}}/{{.BIN}}{{.EXT}} ./cmd/bloblang-lsp/main.go"
       - if: '{{ eq .COMPRESS "true" }}'
         task: build:compress
         vars:
