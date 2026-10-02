@@ -6,8 +6,9 @@ vars:
   VERSION:
     sh: test -n "${VERSION}" && echo "${VERSION}"
   LD_FLAGS: '{{default "-w -s" .LD_FLAGS}}'
+  GO_TAGS: '{{default "" .GO_TAGS}}'
   DATE_BUILT: '{{now | date "2006-01-02T15:04:05Z"}}'
-  GO_BUILD_CMD: go build {{.GO_FLAGS}} -trimpath -tags "{{.TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version={{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
+  GO_BUILD_CMD: go build {{.GO_FLAGS}} -trimpath -tags "{{.GO_TAGS}}" -ldflags "{{.LD_FLAGS}} -X main.Version={{.VERSION}} -X main.DateBuilt={{.DATE_BUILT}}"
 
 tasks:
   build:
@@ -34,7 +35,7 @@ tasks:
       - sh: test -n "{{.ARCH}}"
         msg: Required build variable ARCH is not set
     vars:
-      BIN: "language-server-{{.VERSION}}-{{.OS}}-{{.ARCH}}"
+      BIN: '{{default (printf "language-server-%s-%s-%s" .VERSION .OS .ARCH) .BIN}}'
       EXT: '{{if eq .OS "windows"}}.exe{{end}}'
       COMPRESS: '{{ default true .COMPRESS }}'
     cmds:

@@ -871,8 +871,6 @@ github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=
 github.com/opencontainers/image-spec v1.1.1/go.mod h1:qpqAh3Dmcf36wStyyWU+kCeDgrGnAve2nCC8+7h8Q0M=
-github.com/owenrumney/go-lsp v0.2.2 h1:xXT2lnGrJfM0U+JmoTK8lh40al5oFiMQ2yvIZowKydE=
-github.com/owenrumney/go-lsp v0.2.2/go.mod h1:+3+U1+SZ+wgGXHaAPPieRORYiSkritQBeHzoSCiwL34=
 github.com/owenrumney/go-lsp v0.2.5 h1:PMeCbWYSCGmW1rc5g6RESbZXbZLEziqbThxjulGq4eI=
 github.com/owenrumney/go-lsp v0.2.5/go.mod h1:+3+U1+SZ+wgGXHaAPPieRORYiSkritQBeHzoSCiwL34=
 github.com/parquet-go/bitpack v1.0.0 h1:AUqzlKzPPXf2bCdjfj4sTeacrUwsT7NlcYDMUQxPcQA=
@@ -1011,8 +1009,8 @@ github.com/subosito/gotenv v1.6.0 h1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
 github.com/testcontainers/testcontainers-go v0.42.0 h1:He3IhTzTZOygSXLJPMX7n44XtK+qhjat1nI9cneBbUY=
 github.com/testcontainers/testcontainers-go v0.42.0/go.mod h1:vZjdY1YmUA1qEForxOIOazfsrdyORJAbhi0bp8plN30=
-github.com/teyfix/tree-sitter-bloblang v0.1.5 h1:2JHCt4t2p2prlRsVEKfiOqBoWEual5+eI2iGoJCk1/E=
-github.com/teyfix/tree-sitter-bloblang v0.1.5/go.mod h1:bp5FQINefZZPqK/M9P9c53ROvtSXtFe5BWXouevvgcw=
+github.com/teyfix/tree-sitter-bloblang v0.1.6-0.20261002030930-e9c31637f64d h1:aNKR9WUi2prFKcTw+w8qes8YoeGP27iT2vuBT4La64w=
+github.com/teyfix/tree-sitter-bloblang v0.1.6-0.20261002030930-e9c31637f64d/go.mod h1:bp5FQINefZZPqK/M9P9c53ROvtSXtFe5BWXouevvgcw=
 github.com/tilinna/z85 v1.0.0 h1:uqFnJBlD01dosSeo5sK1G1YGbPuwqVHqR+12OJDRjUw=
 github.com/tilinna/z85 v1.0.0/go.mod h1:EfpFU/DUY4ddEy6CRvk2l+UQNEzHbh+bqBQS+04Nkxs=
 github.com/timandy/routine v1.1.5 h1:LSpm7Iijwb9imIPlucl4krpr2EeCeAUvifiQ9Uf5X+M=

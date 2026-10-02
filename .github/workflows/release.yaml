@@ -7,26 +7,44 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v0.0.1)"
+        description: "Existing tag to release (e.g. v0.2.1)"
         required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [linux, darwin, windows]
-        arch: [amd64, arm64]
+        include:
+          - { os: linux, arch: amd64, runner: ubuntu-24.04, cc: gcc }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm, cc: gcc }
+          - { os: darwin, arch: amd64, runner: macos-15-intel, cc: clang }
+          - { os: darwin, arch: arm64, runner: macos-15, cc: clang }
+          - { os: windows, arch: amd64, runner: windows-latest, cc: gcc }
+          - { os: windows, arch: arm64, runner: windows-latest, cc: "zig cc -target aarch64-windows-gnu" }
+    defaults:
+      run:
+        shell: bash
+    env:
+      CGO_ENABLED: "1"
+      CC: ${{ matrix.cc }}
     steps:
-      - name: Checkout
+      - name: Checkout release tag
         uses: actions/checkout@v5
         with:
+          ref: ${{ env.VERSION }}
           fetch-depth: 0
 
       - name: Set up Go
@@ -34,16 +52,60 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up Windows ARM64 C compiler
+        if: matrix.os == 'windows' && matrix.arch == 'arm64'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.14.1"
+
       - name: Install Task
         uses: go-task/setup-task@v1
 
-      - name: Build
-        run: task build:target OS=${{ matrix.os }} ARCH=${{ matrix.arch }}
+      - name: Test native platform
+        if: matrix.os != 'windows' || matrix.arch != 'arm64'
+        run: go test ./...
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.os }}" = linux ]; then
+            task build:target OS=${{ matrix.os }} ARCH=${{ matrix.arch }} COMPRESS=false BIN=bloblang-lsp-${{ matrix.os }}-${{ matrix.arch }} GO_TAGS=netgo,osusergo LD_FLAGS="-w -s -linkmode external -extldflags -static"
+          else
+            task build:target OS=${{ matrix.os }} ARCH=${{ matrix.arch }} COMPRESS=false BIN=bloblang-lsp-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bloblang-lsp-${{ matrix.os }}-${{ matrix.arch }}
+          path: target/bloblang-lsp-*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bloblang-lsp-*
+          path: target
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd target
+          test "$(find . -maxdepth 1 -type f -name 'bloblang-lsp-*' | wc -l)" -eq 6
+          sha256sum bloblang-lsp-* > SHA256SUMS
+          sha256sum --check SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
-          files: target/**
+          files: target/*
+          fail_on_unmatched_files: true
           overwrite_files: true
-          generate_release_notes: ${{ matrix.os == 'linux' && matrix.arch == 'amd64' }}
+          generate_release_notes: true

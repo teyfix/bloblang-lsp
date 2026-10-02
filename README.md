@@ -83,14 +83,16 @@ Migration from the old sample syntax: change `#!sample {"name":"Ada"}` to `#!inp
 
 ## Build and package
 
-Requires Go 1.26.3+, a C compiler, and the sibling `../tree-sitter-bloblang` checkout. The relative `go.mod` replacement picks up the current grammar. Tree-sitter's Go binding still uses generated C; the bundled extension binary needs no source checkout or compiler at runtime.
+Requires Go 1.26.3+ and a C compiler. The grammar is pinned to a published Go module commit, so builds work from this repository alone. Tree-sitter's Go binding uses generated C; release binaries need no source checkout or compiler at runtime.
 
 ```sh
 go test ./...
 go build -a -o target/bloblang-lsp ./cmd/bloblang-lsp
 ```
 
-Use `-a` after regenerating the sibling grammar: its included `parser.c` lives outside the Go package directory and Go's normal package cache can miss the change. In `../vscode-bloblang`, run `bun run package` to build a platform VSIX with the binary included. The extension can also launch a configured external binary for development.
+To develop against the sibling grammar, use `go mod edit -replace github.com/teyfix/tree-sitter-bloblang=../tree-sitter-bloblang` locally and remove that replacement before committing. Use `-a` after regenerating its grammar: the included `parser.c` lives outside the Go package directory and Go's normal package cache can miss the change.
+
+Tagged releases publish `bloblang-lsp-<os>-<arch>` binaries (`.exe` on Windows) and `SHA256SUMS` for Linux, macOS and Windows on amd64 and arm64. The VS Code extension downloads the latest release for its host platform and verifies the checksum. A configured external binary can also be used for development.
 
 To verify a private mapping corpus without changing files:
 

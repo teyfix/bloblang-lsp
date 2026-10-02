@@ -4,14 +4,14 @@ go 1.26.3
 
 require (
 	github.com/dustin/go-humanize v1.0.1
-	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/owenrumney/go-lsp v0.2.5
 	github.com/redpanda-data/benthos/v4 v4.73.0
 	github.com/redpanda-data/connect/v4 v4.92.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
-	github.com/teyfix/tree-sitter-bloblang v0.1.5
+	github.com/teyfix/tree-sitter-bloblang v0.1.6-0.20261002030930-e9c31637f64d
 	github.com/tree-sitter/go-tree-sitter v0.25.0
+	go.yaml.in/yaml/v3 v3.0.4
 )
 
 require (
@@ -67,6 +67,7 @@ require (
 	github.com/govalues/decimal v0.1.36 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.7 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/influxdata/go-syslog/v3 v3.0.0 // indirect
 	github.com/itchyny/gojq v0.12.19 // indirect
 	github.com/itchyny/timefmt-go v0.1.8 // indirect
@@ -136,7 +137,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
@@ -149,5 +149,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-replace github.com/teyfix/tree-sitter-bloblang => ../tree-sitter-bloblang
