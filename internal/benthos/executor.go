@@ -64,7 +64,11 @@ func sampleOf(v any) *Sample {
 	return &Sample{Value: v}
 }
 func (e *Executor) execute(uri string, sample *Sample, snippet string) (*PartialResult, error) {
-	env := e.benv.WithCustomImporter(func(name string) ([]byte, error) {
+	preview, err := PreviewEnvironment(e.benv, sample)
+	if err != nil {
+		return nil, err
+	}
+	env := preview.WithCustomImporter(func(name string) ([]byte, error) {
 		if !filepath.IsAbs(name) {
 			name = filepath.Join(documentDir(uri), name)
 		}

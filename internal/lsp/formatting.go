@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
+	"github.com/teyfix/bloblang-lsp/internal/benthos"
 	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
@@ -34,7 +35,11 @@ func tokens(n *tree_sitter.Node, source []byte, out *[]formatToken) {
 	}
 }
 func (h *Handler) formatText(uri protocol.DocumentURI, text string, tabSize int) (string, bool) {
-	env := h.benv.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
+	preview, err := benthos.PreviewEnvironment(h.benv, h.getSample(uri))
+	if err != nil {
+		return text, false
+	}
+	env := preview.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
 	_, originalErr := env.Parse(text)
 	tree, err := h.parser.Parse(string(uri)+":format", text)
 	if err != nil || tree == nil {

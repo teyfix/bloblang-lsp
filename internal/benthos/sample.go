@@ -19,6 +19,7 @@ type Sample struct {
 	HasRoot         bool
 	Value           any
 	Meta            map[string]any
+	Env             map[string]string
 	Source          string
 	Line            int
 	Dependencies    []string
@@ -109,6 +110,23 @@ func applySample(c *sampleContext, value any, field string) error {
 		}
 		c.sample.Value = v
 		c.hasInput = true
+	}
+	if field == "sample" {
+		c.sample.Env = nil
+		if raw, exists := obj["env"]; exists {
+			values, ok := raw.(map[string]any)
+			if !ok {
+				return fmt.Errorf("sample env must be an object of string values")
+			}
+			c.sample.Env = make(map[string]string, len(values))
+			for name, value := range values {
+				s, ok := value.(string)
+				if !ok {
+					return fmt.Errorf("sample env value for %q must be a string", name)
+				}
+				c.sample.Env[name] = s
+			}
+		}
 	}
 	if field == "sample" || field == "meta" {
 		if v, exists := obj["meta"]; exists {

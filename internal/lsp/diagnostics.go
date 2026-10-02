@@ -11,6 +11,7 @@ import (
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
+	"github.com/teyfix/bloblang-lsp/internal/benthos"
 )
 
 func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI, version uint64) {
@@ -237,7 +238,12 @@ func (h *Handler) diagnosticsText(uri protocol.DocumentURI, text string) []proto
 		tree.Close()
 	}
 	if text != "" && hasCode {
-		env := h.benv.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
+		preview, err := benthos.PreviewEnvironment(h.benv, h.getSample(uri))
+		if err != nil {
+			h.logger.Debug("preview environment setup failed", "err", err)
+			preview = h.benv
+		}
+		env := preview.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
 		if _, err := env.Parse(text); err != nil {
 			diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)
 		} else if sample := h.getSample(uri); sample != nil {

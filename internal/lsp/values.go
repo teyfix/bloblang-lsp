@@ -43,7 +43,7 @@ func hoverExpression(n *tree_sitter.Node) *tree_sitter.Node {
 	default:
 		if p := n.Parent(); p != nil {
 			switch p.Kind() {
-			case "field_access", "method_call", "call_expr", "variable_ref", "meta_ref":
+			case "field_access", "method_call", "call_expr", "variable_ref", "meta_ref", "binary_expr":
 				n = p
 			default:
 				return nil

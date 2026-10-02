@@ -9,3 +9,5 @@ Reached conditional branches preserve preceding statements and conditions. Unrea
 Values, inlay tooltips, and Show Input/Output use the same renderer in [`preview.go`](../../internal/lsp/preview.go). YAML is the default; `preview.format: "json"` selects JSON. Both use `formatter.printWidth` to collapse small collections and expand larger values. Inline labels have a separate `max_inline_result_bytes` startup limit. Show Input/Output opens a temporary file with the selected format's extension.
 
 Positions use LSP UTF-16 columns and embedded YAML regions map ranges back to the host document. See [sample configuration](sample.md) and [workspace settings](../core/settings.md).
+
+Environment expressions use preview-only fixtures: unspecified names evaluate to an empty string, while a whole sample's `env` map can supply explicit string values. No process environment values are exposed. Hovering a binary operator evaluates its enclosing binary expression when a valid sample exists. See [environment fixtures](sample.md#environment-fixtures) for differences from production fallback behavior.

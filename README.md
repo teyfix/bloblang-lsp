@@ -66,6 +66,19 @@ root.status = this.result.get(root.provider_file_ref)
 
 Metadata enters a public `service.Message`, so `meta("topic")` and `@topic` work. Metadata assignments update preview output metadata. Each prefix starts from a fresh sample. The first assignment's left-hand `root` tooltip shows the input (or explicit target); later left-hand tooltips show the prior prefix output. Right-hand `root` follows Benthos's current output semantics and can be uninitialized before the first assignment. `this` retains the input within that mapping.
 
+IDE validation and sample execution use an isolated `env()` resolver: a whole sample's optional `env` object supplies explicit string values, and every unspecified name evaluates to `""`. The resolver never reads or changes the language server's process environment. This keeps concatenations such as `"email=" + env("MIXDROP_API_EMAIL")` evaluable in the editor. Real Bloblang still returns null for unset variables, so the environment fallback lint warning remains.
+
+```yaml
+$bloblang:
+  input:
+    provider_file_ref: fixture-ref
+  env:
+    MIXDROP_API_EMAIL: example@example.test
+    SUBTITLE_FILE: /tmp/fixture.srt
+```
+
+Use fixture values in these overrides. They apply to whole samples loaded automatically, through `#!sample_from`, or inline through `#!sample {input: ..., env: {...}}`. Empty placeholders can take different `.or(...)`, `.catch(...)`, or null-check paths from the real runtime; previews are not a substitute for production validation.
+
 Migration from the old sample syntax: change `#!sample {"name":"Ada"}` to `#!input {"name":"Ada"}`, or `#!sample {"input":{"name":"Ada"}}`. Wrap old raw sample files under `$bloblang.input`.
 
 ## Build and package
