@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # External Package Reference
 
 This directory describes every external package used in `bloblang-lsp`. Because these packages are niche, these docs are the authoritative guide for implementing agents.

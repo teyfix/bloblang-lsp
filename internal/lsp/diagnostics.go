@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf16"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
-	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI, version uint64) {
@@ -20,65 +20,24 @@ func (h *Handler) validateDocument(ctx context.Context, uri protocol.DocumentURI
 	}
 
 	diagnostics := append([]protocol.Diagnostic{}, h.sampleDiagnosticsFor(uri)...)
-	if text != "" {
-		hasSyntaxError := false
-		tree, parseErr := h.parser.Parse(string(uri), text)
-		if parseErr == nil && tree != nil {
-			root := tree.RootNode()
-			if root.HasError() {
-				hasSyntaxError = true
-				severity := protocol.SeverityError
-				source := "bloblang (syntax)"
-
-				var collectErrors func(*tree_sitter.Node)
-				collectErrors = func(node *tree_sitter.Node) {
-					if node.IsError() {
-						diagnostics = append(diagnostics, protocol.Diagnostic{
-							Range: protocol.Range{
-								Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
-								End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
-							},
-							Severity: &severity,
-							Source:   source,
-							Message:  "Syntax error",
-						})
-						return
+	if yamlDocument(uri) && !strings.Contains(string(uri), "#bloblang-") {
+		diagnostics = h.yamlPathDiagnostics(uri, text)
+		seenMissing := false
+		for _, r := range h.regions(uri) {
+			for _, d := range h.diagnosticsText(r.uri, r.text) {
+				if strings.Contains(d.Message, "not found; add one") {
+					if seenMissing {
+						continue
 					}
-					if node.IsMissing() {
-						diagnostics = append(diagnostics, protocol.Diagnostic{
-							Range: protocol.Range{
-								Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
-								End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
-							},
-							Severity: &severity,
-							Source:   source,
-							Message:  fmt.Sprintf("Missing %s", node.Kind()),
-						})
-						return
-					}
-					for i := uint(0); i < node.ChildCount(); i++ {
-						child := node.Child(i)
-						if child.HasError() {
-							collectErrors(child)
-						}
-					}
+					seenMissing = true
 				}
-				collectErrors(root)
+				d.Range = r.hostRange(text, d.Range)
+				diagnostics = append(diagnostics, d)
 			}
 		}
-
-		if !hasSyntaxError {
-			env := h.benv.WithCustomImporter(func(name string) ([]byte, error) {
-				return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name))
-			})
-			_, err := env.Parse(text)
-			if err != nil {
-				diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)
-			}
-		}
+	} else {
+		diagnostics = h.diagnosticsText(uri, text)
 	}
-
-	diagnostics = append(diagnostics, h.importHintDiagnostics(uri, text)...)
 
 	h.mu.Lock()
 	currentVersion, ok := h.latestVersion[uri]
@@ -109,7 +68,7 @@ func indentMessage(msg string) string {
 	return strings.Join(indentParts, "\n")
 }
 
-func convertErrorToDiagnostics(_ string, err error) []protocol.Diagnostic {
+func convertErrorToDiagnostics(text string, err error) []protocol.Diagnostic {
 	severity := protocol.SeverityError
 	source := "bloblang"
 
@@ -156,6 +115,13 @@ func convertErrorToDiagnostics(_ string, err error) []protocol.Diagnostic {
 		char--
 	}
 
+	lines := strings.Split(text, "\n")
+	if line >= 0 && line < len(lines) {
+		runes := []rune(lines[line])
+		if char <= len(runes) {
+			char = len(utf16.Encode(runes[:char]))
+		}
+	}
 	return []protocol.Diagnostic{{
 		Range: protocol.Range{
 			Start: protocol.Position{Line: line, Character: char},
@@ -214,6 +180,7 @@ func (h *Handler) importHintDiagnostics(uri protocol.DocumentURI, text string) [
 
 	tree, parseErr := h.parser.Parse(string(uri), text)
 	if parseErr == nil && tree != nil {
+		defer tree.Close()
 		root := tree.RootNode()
 		for i := uint(0); i < root.ChildCount(); i++ {
 			child := root.Child(i)
@@ -253,5 +220,25 @@ func (h *Handler) importHintDiagnostics(uri protocol.DocumentURI, text string) [
 			Message:  fmt.Sprintf("Import base directory: %s", h.baseDirForURI(uri)),
 		})
 	}
+	return diagnostics
+}
+
+func (h *Handler) diagnosticsText(uri protocol.DocumentURI, text string) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+	if text != "" {
+		env := h.benv.WithCustomImporter(func(name string) ([]byte, error) { return os.ReadFile(filepath.Join(h.baseDirForURI(uri), name)) })
+		if _, err := env.Parse(text); err != nil {
+			diagnostics = append(diagnostics, convertErrorToDiagnostics(text, err)...)
+		} else if sample := h.getSample(uri); sample != nil {
+			if _, err := h.executor.ExecuteThrough(h.parser, string(uri), sample, text, uint(len(text))); err != nil {
+				severity := protocol.SeverityWarning
+				diagnostics = append(diagnostics, protocol.Diagnostic{Range: protocol.Range{}, Severity: &severity, Source: "bloblang sample", Message: err.Error()})
+			}
+		}
+	}
+	if strings.HasPrefix(string(uri), "untitled:") {
+		diagnostics = append(diagnostics, h.importHintDiagnostics(uri, text)...)
+	}
+	diagnostics = append(diagnostics, h.sampleDiagnosticsFor(uri)...)
 	return diagnostics
 }

@@ -26,3 +26,13 @@ func TestConvertErrorToDiagnostics(t *testing.T) {
 	assert.Equal(t, 0, diags2[0].Range.Start.Character)
 	assert.Equal(t, "something went wrong entirely", diags2[0].Message)
 }
+
+func TestDiagnosticUnicodeColumns(t *testing.T) {
+	text := "root = \"😀\" + ("
+	h, _ := featureHandler(t)
+	_, err := h.benv.Parse(text)
+	assert.Error(t, err)
+	diags := convertErrorToDiagnostics(text, err)
+	assert.Len(t, diags, 1)
+	assert.Equal(t, bytePosition(text, len(text)), diags[0].Range.Start)
+}

@@ -3,69 +3,251 @@ package benthos
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
+// Sample preserves input presence (including null) separately from its value.
 type Sample struct {
-	Value  interface{}
-	Source string
-	Line   int
+	Root            any
+	HasRoot         bool
+	Value           any
+	Meta            map[string]any
+	Source          string
+	Line            int
+	Dependencies    []string
+	DependencyLines map[string]int
 }
 
-func ExtractSample(parser *Bloblang, uri string, text string, baseDir string) (*Sample, error) {
-	tree, err := parser.Parse(uri, text)
-	if err != nil {
+type SampleError struct {
+	Line    int
+	Message string
+}
+
+func (e *SampleError) Error() string { return e.Message }
+
+type sampleContext struct {
+	sample   Sample
+	hasInput bool
+}
+type DirectiveHandler func(*sampleContext, string, string) error
+
+// The registry keeps directive parsing independent from data loading.
+var directiveHandlers = map[string]DirectiveHandler{
+	"root": func(c *sampleContext, raw, _ string) error {
+		v, err := decodeSampleValue([]byte(raw))
+		if err == nil {
+			c.sample.Root = v
+			c.sample.HasRoot = true
+		}
+		return err
+	},
+	"input": func(c *sampleContext, raw, _ string) error {
+		v, err := decodeSampleValue([]byte(raw))
+		if err == nil {
+			c.sample.Value = v
+			c.hasInput = true
+		}
+		return err
+	},
+	"meta": func(c *sampleContext, raw, _ string) error {
+		v, err := decodeSampleValue([]byte(raw))
+		if err != nil {
+			return err
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			return fmt.Errorf("meta must be an object")
+		}
+		c.sample.Meta = m
+		return nil
+	},
+	"sample": func(c *sampleContext, raw, _ string) error {
+		v, err := decodeSampleValue([]byte(raw))
+		if err != nil {
+			return err
+		}
+		return applySample(c, v, "sample")
+	},
+}
+
+func decodeSampleValue(data []byte) (any, error) {
+	var v any
+	if json.Unmarshal(data, &v) == nil {
+		return v, nil
+	}
+	if err := yaml.Unmarshal(data, &v); err != nil {
 		return nil, err
 	}
-	root := tree.RootNode()
-	for i := uint(0); i < root.ChildCount(); i++ {
-		child := root.Child(i)
-		if child.Kind() != "comment" {
-			// A non-comment statement node is encountered. Any sample directives must be placed before statements.
-			return nil, nil
-		}
-
-		commentText := child.Utf8Text([]byte(text))
-		lineText := strings.TrimSpace(commentText)
-
-		switch {
-		case strings.HasPrefix(lineText, "#!sample "):
-			raw := strings.TrimSpace(strings.TrimPrefix(lineText, "#!sample "))
-			var value interface{}
-			if err := json.Unmarshal([]byte(raw), &value); err != nil {
-				return nil, err
-			}
-			return &Sample{
-				Value:  value,
-				Source: "inline",
-				Line:   int(child.StartPosition().Row),
-			}, nil
-		case strings.HasPrefix(lineText, "#!sample_from "):
-			rel := strings.TrimSpace(strings.TrimPrefix(lineText, "#!sample_from "))
-			if rel == "" {
-				return nil, fmt.Errorf("missing sample file path")
-			}
-			source := filepath.Join(baseDir, rel)
-			data, err := os.ReadFile(source)
-			if err != nil {
-				return nil, err
-			}
-			var value interface{}
-			if err := json.Unmarshal(data, &value); err != nil {
-				return nil, err
-			}
-			abs, err := filepath.Abs(source)
-			if err != nil {
-				abs = source
-			}
-			return &Sample{
-				Value:  value,
-				Source: abs,
-				Line:   int(child.StartPosition().Row),
-			}, nil
+	return v, nil
+}
+func applySample(c *sampleContext, value any, field string) error {
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("sample must be an object with input and optional meta")
+	}
+	if field == "sample" || field == "root" {
+		if v, exists := obj["root"]; exists {
+			c.sample.Root = v
+			c.sample.HasRoot = true
+		} else if field == "root" {
+			return fmt.Errorf("sample is missing root")
 		}
 	}
-	return nil, nil
+	if field == "sample" || field == "input" {
+		v, exists := obj["input"]
+		if !exists {
+			return fmt.Errorf("sample is missing input")
+		}
+		c.sample.Value = v
+		c.hasInput = true
+	}
+	if field == "sample" || field == "meta" {
+		if v, exists := obj["meta"]; exists {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return fmt.Errorf("sample meta must be an object")
+			}
+			c.sample.Meta = m
+		} else if field == "meta" {
+			return fmt.Errorf("sample is missing meta")
+		} else {
+			c.sample.Meta = nil
+		}
+	}
+	return nil
+}
+func loadSample(c *sampleContext, path, field string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	v, err := decodeSampleValue(data)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s: missing mandatory $bloblang envelope", path)
+	}
+	env, exists := obj["$bloblang"]
+	if !exists {
+		return fmt.Errorf("%s: missing mandatory $bloblang envelope", path)
+	}
+	if err = applySample(c, env, field); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	c.sample.Source = path
+	c.sample.Dependencies = append(c.sample.Dependencies, path)
+	return nil
+}
+
+func ExtractSample(_ *Bloblang, uri, text, baseDir string) (*Sample, error) {
+	c := &sampleContext{sample: Sample{Source: "inline"}}
+	u, _ := url.Parse(uri)
+	stem := strings.TrimSuffix(filepath.Base(u.Path), filepath.Ext(u.Path))
+	var siblings []string
+	for _, ext := range []string{"json", "yaml", "yml"} {
+		p := filepath.Join(baseDir, stem+".sample."+ext)
+		if _, err := os.Stat(p); err == nil {
+			siblings = append(siblings, p)
+		}
+	}
+	lines := strings.Split(text, "\n")
+	// Explicit entire-sample source resolves sibling ambiguity.
+	explicit := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t != "" && !strings.HasPrefix(t, "#") {
+			break
+		}
+		if strings.HasPrefix(t, "#!sample_from ") || strings.HasPrefix(t, "#!sample ") {
+			explicit = true
+		}
+	}
+	if len(siblings) > 1 && !explicit {
+		return nil, &SampleError{Message: "Multiple sibling samples found; select one with #!sample_from"}
+	}
+	if len(siblings) == 1 && !explicit {
+		if err := loadSample(c, siblings[0], "sample"); err != nil {
+			return nil, &SampleError{Message: err.Error()}
+		}
+	}
+	seen := map[string]bool{}
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || (strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "#!")) {
+			continue
+		}
+		if !strings.HasPrefix(line, "#!") {
+			break
+		}
+		parts := strings.SplitN(strings.TrimSpace(strings.TrimPrefix(line, "#!")), " ", 2)
+		name := parts[0]
+		raw := ""
+		if len(parts) > 1 {
+			raw = strings.TrimSpace(parts[1])
+		}
+		start := i
+		if raw == "|" {
+			var body []string
+			for i+1 < len(lines) {
+				next := strings.TrimLeft(lines[i+1], " \t")
+				if !strings.HasPrefix(next, "#|") {
+					break
+				}
+				i++
+				next = strings.TrimPrefix(next, "#|")
+				if strings.HasPrefix(next, " ") {
+					next = next[1:]
+				}
+				body = append(body, next)
+			}
+			raw = strings.Join(body, "\n")
+		}
+		field := strings.TrimSuffix(name, "_from")
+		handler, ok := directiveHandlers[field]
+		if !ok {
+			return nil, &SampleError{Line: start, Message: fmt.Sprintf("Unknown sample directive %q", name)}
+		}
+		if seen[name] {
+			return nil, &SampleError{Line: start, Message: "Duplicate #!" + name + " directive"}
+		}
+		seen[name] = true
+		var err error
+		if strings.TrimSpace(raw) == "" {
+			return nil, &SampleError{Line: start, Message: "Missing value for #!" + name}
+		}
+		if strings.HasSuffix(name, "_from") {
+			p := strings.Trim(raw, "\"'")
+			if p == "" {
+				err = fmt.Errorf("missing sample file path")
+			} else {
+				if !filepath.IsAbs(p) {
+					p = filepath.Join(baseDir, p)
+				}
+				err = loadSample(c, p, field)
+				if err == nil {
+					if c.sample.DependencyLines == nil {
+						c.sample.DependencyLines = map[string]int{}
+					}
+					c.sample.DependencyLines[p] = start
+				}
+			}
+		} else {
+			err = handler(c, raw, baseDir)
+		}
+		if err != nil {
+			return nil, &SampleError{Line: start, Message: err.Error()}
+		}
+		c.sample.Line = start
+	}
+	if !c.hasInput {
+		return nil, nil
+	}
+	return &c.sample, nil
 }

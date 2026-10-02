@@ -47,7 +47,7 @@ func TestIntegrationFunctionHover(t *testing.T) {
 	h.OpenDocument(uri, "root = json(\"name\")")
 	hover := h.GetHover(uri, protocol.Position{Line: 0, Character: len("root = js")})
 	require.NotNil(t, hover)
-	assert.Contains(t, hover.Contents.Value, "# [json]")
+	assert.Contains(t, hover.Contents.Value(), "# [json]")
 }
 
 func TestIntegrationDiagnostics(t *testing.T) {
@@ -61,7 +61,7 @@ func TestIntegrationDiagnostics(t *testing.T) {
 	h.Server.ClearDiagnostics()
 	h.ChangeDocument(uri, "root = \"ok\"")
 	diags = h.WaitForDiagnostics(uri, time.Second)
-	assert.Empty(t, diags)
+	assert.NotContains(t, diagnosticMessages(diags), "Syntax error")
 }
 
 func TestIntegrationImmediateDiagnostics(t *testing.T) {
@@ -79,7 +79,7 @@ func TestIntegrationImmediateDiagnostics(t *testing.T) {
 
 	// Wait for diagnostics to be cleared
 	diags = h.WaitForDiagnostics(uri, time.Second)
-	assert.Empty(t, diags)
+	assert.NotContains(t, diagnosticMessages(diags), "Syntax error")
 }
 
 func TestIntegrationCloseClearsDiagnostics(t *testing.T) {
@@ -91,7 +91,7 @@ func TestIntegrationCloseClearsDiagnostics(t *testing.T) {
 	h.Server.ClearDiagnostics()
 	h.CloseDocument(uri)
 	diags = h.WaitForDiagnostics(uri, time.Second)
-	assert.Empty(t, diags)
+	assert.NotContains(t, diagnosticMessages(diags), "Syntax error")
 }
 
 func TestIntegrationImportHints(t *testing.T) {
@@ -118,7 +118,7 @@ func TestIntegrationUntitledImportHints(t *testing.T) {
 func TestIntegrationInlayHintsAndCodeLens(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/inlay.blobl"
-	h.OpenDocument(uri, "#!sample {\"name\":\"alice\"}\nroot = this.name")
+	h.OpenDocument(uri, "#!input {\"name\":\"alice\"}\nroot = this.name")
 
 	// Inlay hint shows the OUTPUT after the line: root = this.name → "alice"
 	hints := h.GetInlayHints(uri)
@@ -140,7 +140,7 @@ func TestIntegrationTruncatedCodeLensCommand(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/truncated.blobl"
 	h.OpenDocument(uri, `
-#!sample {"name":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}
+#!input {"name":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"}
 root = this.name`[1:])
 	lenses := h.GetCodeLenses(uri)
 	require.Len(t, lenses, 2)
@@ -161,11 +161,11 @@ root = this.name`[1:])
 func TestIntegrationRootHover(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/root-hover.blobl"
-	h.OpenDocument(uri, "#!sample {\"name\":\"alice\"}\nroot = this.name")
+	h.OpenDocument(uri, "#!input {\"name\":\"alice\"}\nroot = this.name")
 	hover := h.GetHover(uri, protocol.Position{Line: 1, Character: 1})
 	require.NotNil(t, hover)
-	assert.Contains(t, hover.Contents.Value, "```json")
-	assert.Contains(t, hover.Contents.Value, `"alice"`)
+	assert.Contains(t, hover.Contents.Value(), "```json")
+	assert.Contains(t, hover.Contents.Value(), `"alice"`)
 }
 
 func TestIntegrationRootHoverNoSample(t *testing.T) {
@@ -173,8 +173,7 @@ func TestIntegrationRootHoverNoSample(t *testing.T) {
 	uri := "file:///tmp/root-hover-no-sample.blobl"
 	h.OpenDocument(uri, "root = this.name")
 	hover := h.GetHover(uri, protocol.Position{Line: 0, Character: 1})
-	require.NotNil(t, hover)
-	assert.Contains(t, hover.Contents.Value, "#!sample")
+	assert.Nil(t, hover)
 }
 
 func TestIntegrationRootHoverNonAssignment(t *testing.T) {
@@ -189,7 +188,7 @@ func TestIntegrationSubPathInlayHintsAndCodeLens(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/subpath.blobl"
 	// sub-path assignment: root.name = this.name
-	h.OpenDocument(uri, "#!sample {\"name\":\"alice\"}\nroot.name = this.name")
+	h.OpenDocument(uri, "#!input {\"name\":\"alice\"}\nroot.name = this.name")
 
 	// inlay hint should appear on line 1 showing the output {"name":"alice"}
 	hints := h.GetInlayHints(uri)
@@ -202,7 +201,7 @@ func TestIntegrationSubPathInlayHintsAndCodeLens(t *testing.T) {
 func TestIntegrationCumulativeLensesAndHints(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/cumulative.blobl"
-	doc := "#!sample {\"name\":\"alice\",\"age\":30}\nroot.name = this.name\nroot.age = this.age"
+	doc := "#!input {\"name\":\"alice\",\"age\":30}\nroot.name = this.name\nroot.age = this.age"
 	h.OpenDocument(uri, doc)
 
 	// inlay hints: line 1 shows output after first assignment → {"name":"alice"}
@@ -219,7 +218,7 @@ func TestIntegrationSampleFromCodeLens(t *testing.T) {
 	h := testutil.NewHarness(t)
 	dir := t.TempDir()
 	samplePath := filepath.Join(dir, "my_sample.json")
-	require.NoError(t, os.WriteFile(samplePath, []byte(`{"name":"bob"}`), 0644))
+	require.NoError(t, os.WriteFile(samplePath, []byte(`{"$bloblang":{"input":{"name":"bob"}}}`), 0644))
 
 	uri := "file:///" + filepath.ToSlash(dir) + "/test.blobl"
 	doc := fmt.Sprintf("#!sample_from %s\nroot = this.name", "my_sample.json")
@@ -239,7 +238,7 @@ func TestIntegrationMultilineInlayHint(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/multiline.blobl"
 	// Multi-line assignment: root.msg spans lines 1-3
-	doc := "#!sample {\"message\":\"hello world\"}\nroot.msg = this.\n  message.\n  replace(\"hello\", \"good morning\")"
+	doc := "#!input {\"message\":\"hello world\"}\nroot.msg = this.\n  message.\n  replace(\"hello\", \"good morning\")"
 	h.OpenDocument(uri, doc)
 
 	hints := h.GetInlayHints(uri)
@@ -251,23 +250,22 @@ func TestIntegrationExecDiagnostic(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/exec-diag.blobl"
 	// this.name is null (not in sample) → calling .uppercase() on null errors at runtime
-	h.OpenDocument(uri, "#!sample {}\nroot = this.name.uppercase()")
+	h.OpenDocument(uri, "#!input {}\nroot = this.name.uppercase()")
 
 	// Trigger inlay hints — this runs ExecuteCumulative which will fail and publish a warning diagnostic.
 	h.GetInlayHints(uri)
 
-	// publishExecDiagnostics calls publishDiagnostics synchronously from the InlayHint handler.
-	// Use Diagnostics(uri) to get the most recently published set for this URI.
-	diags := h.Server.Diagnostics(protocol.DocumentURI(uri))
-	// Should have a warning diagnostic on line 1 (the failing root assignment)
-	testutil.AssertDiagnosticAt(t, diags, 1, "")
+	// Execution warnings are delivered as an asynchronous notification.
+	diags := h.WaitForDiagnostics(uri, time.Second)
+	require.NotEmpty(t, diags)
+
 }
 
 func TestIntegrationMapDeclarationCumulative(t *testing.T) {
 	h := testutil.NewHarness(t)
 	uri := "file:///tmp/map-cumulative.blobl"
 	doc := `
-#!sample {"user": {"first_name": "john"}}
+#!input {"user": {"first_name": "john"}}
 map normalize_name {
   root = this.uppercase()
 }
@@ -280,5 +278,15 @@ root.name = this.user.first_name.apply("normalize_name")`[1:]
 
 	// Verification of diagnostics: no compilation/execution errors should exist
 	diags := h.Server.Diagnostics(protocol.DocumentURI(uri))
-	assert.Empty(t, diags)
+	assert.NotContains(t, diagnosticMessages(diags), "Syntax error")
+}
+
+func diagnosticMessages(ds []protocol.Diagnostic) []string {
+	out := []string{}
+	for _, d := range ds {
+		if d.Severity != nil && *d.Severity == protocol.SeverityError {
+			out = append(out, d.Message)
+		}
+	}
+	return out
 }

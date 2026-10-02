@@ -22,7 +22,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := lsp.NewServer(handler, logr).Run(context.Background(), server.RunStdio()); err != nil {
+	if err := lsp.Run(context.Background(), handler, logr, server.RunStdio()); err != nil {
 		log.Fatal(err)
 	}
 }

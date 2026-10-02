@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -32,7 +31,7 @@ type Handler struct {
 	client    *server.Client
 	executor  *benthos.Executor
 
-	mu          sync.Mutex
+	mu sync.Mutex
 
 	workspaceRoot  string
 	importBaseDirs map[protocol.DocumentURI]string
@@ -52,6 +51,8 @@ type Handler struct {
 	execDiagnosticsMu sync.RWMutex
 
 	latestVersion map[protocol.DocumentURI]uint64
+	refreshInlays bool
+	refreshLenses bool
 }
 
 func NewHandler(cfg *config.Config, logger *slog.Logger) (*Handler, error) {
@@ -99,6 +100,14 @@ func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParam
 			h.workspaceRoot = path
 		}
 	}
+	if w := params.Capabilities.Workspace; w != nil {
+		if w.InlayHint != nil && w.InlayHint.RefreshSupport != nil {
+			h.refreshInlays = *w.InlayHint.RefreshSupport
+		}
+		if w.CodeLens != nil && w.CodeLens.RefreshSupport != nil {
+			h.refreshLenses = *w.CodeLens.RefreshSupport
+		}
+	}
 	openClose := true
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
@@ -109,10 +118,13 @@ func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParam
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{".", "@", "$"},
 			},
-			HoverProvider:          new(true),
-			InlayHintProvider:      &protocol.InlayHintOptions{},
-			CodeLensProvider:       &protocol.CodeLensOptions{},
-			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{Commands: []string{"bloblang-lsp.showResult", "bloblang-lsp.openFile"}},
+			HoverProvider:              new(true),
+			DefinitionProvider:         new(true),
+			ReferencesProvider:         new(true),
+			DocumentFormattingProvider: new(true),
+			InlayHintProvider:          &protocol.InlayHintOptions{},
+			CodeLensProvider:           &protocol.CodeLensOptions{},
+			ExecuteCommandProvider:     &protocol.ExecuteCommandOptions{Commands: []string{"bloblang-lsp.showResult", "bloblang-lsp.openFile"}},
 		},
 		ServerInfo: &protocol.ServerInfo{Name: "bloblang-lsp", Version: "v0.0.1"},
 	}, nil
@@ -136,7 +148,11 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	h.importBasesMu.Lock()
 	h.importBaseDirs[uri] = baseDir
 	h.importBasesMu.Unlock()
-	h.updateSample(uri, doc.Text())
+	if yamlDocument(uri) {
+		h.syncRegions(uri, doc.Text())
+	} else {
+		h.updateSample(uri, doc.Text())
+	}
 	h.executor.InvalidateDocument(string(uri))
 	h.clearExecDiagnostics(uri)
 
@@ -145,10 +161,7 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	ver := h.latestVersion[uri]
 	h.mu.Unlock()
 
-	go func(v uint64) {
-		h.validateDocument(context.Background(), uri, v)
-		h.scheduleRefresh(uri)
-	}(ver)
+	go func(v uint64) { h.validateDocument(context.Background(), uri, v); h.scheduleRefresh(uri) }(ver)
 	return nil
 }
 
@@ -158,7 +171,11 @@ func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextD
 		return err
 	}
 	uri := params.TextDocument.URI
-	h.updateSample(uri, doc.Text())
+	if yamlDocument(uri) {
+		h.syncRegions(uri, doc.Text())
+	} else {
+		h.updateSample(uri, doc.Text())
+	}
 	h.executor.InvalidateDocument(string(uri))
 	h.clearExecDiagnostics(uri)
 
@@ -167,15 +184,13 @@ func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextD
 	ver := h.latestVersion[uri]
 	h.mu.Unlock()
 
-	go func(v uint64) {
-		h.validateDocument(context.Background(), uri, v)
-		h.scheduleRefresh(uri)
-	}(ver)
+	go func(v uint64) { h.validateDocument(context.Background(), uri, v); h.scheduleRefresh(uri) }(ver)
 	return nil
 }
 
 func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	uri := params.TextDocument.URI
+	h.clearRegions(uri)
 	h.documents.Close(params)
 	h.importBasesMu.Lock()
 	delete(h.importBaseDirs, uri)
@@ -193,40 +208,69 @@ func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDoc
 	delete(h.latestVersion, uri)
 	h.mu.Unlock()
 
-	h.publishDiagnostics(ctx, uri, nil)
+	go h.publishDiagnostics(context.Background(), uri, nil)
 	return nil
 }
 
-func (h *Handler) Completion(_ context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
+func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
+	if yamlDocument(params.TextDocument.URI) && !strings.Contains(string(params.TextDocument.URI), "#bloblang-") {
+		r, pos, ok := h.regionAt(params.TextDocument.URI, params.Position)
+		if !ok {
+			return &protocol.CompletionList{Items: []protocol.CompletionItem{}}, nil
+		}
+		cp := *params
+		cp.TextDocument.URI = r.uri
+		cp.Position = pos
+		return h.Completion(ctx, &cp)
+	}
 	items := h.completionItems
 	if text, ok := h.documents.Text(params.TextDocument.URI); ok {
 		lines := strings.Split(text, "\n")
-		switch getCompletionContext(lines, params.Position.Line, params.Position.Character) {
+		pos := byteColumn(text, params.Position)
+		switch getCompletionContext(lines, pos.Line, pos.Character) {
 		case "method":
 			items = filterCompletions(items, protocol.CompletionItemKindMethod)
+			items = h.methodCompletion(params.TextDocument.URI, text, params.Position, items)
 		case "function":
 			items = filterCompletions(items, protocol.CompletionItemKindFunction)
 		case "variable":
-			items = []protocol.CompletionItem{}
+			items = h.variableCompletions(params.TextDocument.URI, text, params.Position)
 		}
 	}
 	return &protocol.CompletionList{Items: items}, nil
 }
 
-func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	uri := params.TextDocument.URI
+	if yamlDocument(uri) && !strings.Contains(string(uri), "#bloblang-") {
+		r, pos, ok := h.regionAt(uri, params.Position)
+		if !ok {
+			return nil, nil
+		}
+		cp := *params
+		cp.TextDocument.URI = r.uri
+		cp.Position = pos
+		v, err := h.Hover(ctx, &cp)
+		if v != nil && v.Range != nil {
+			host, _ := h.documents.Text(uri)
+			*v.Range = r.hostRange(host, *v.Range)
+		}
+		return v, err
+	}
 	text, ok := h.documents.Text(uri)
 	if !ok {
 		return nil, nil
 	}
-	lineIdx := params.Position.Line
-	col := params.Position.Character
+	position := byteColumn(text, params.Position)
+	lineIdx := position.Line
+	col := position.Character
 
 	tree, parseErr := h.parser.Parse(string(uri), text)
 	if parseErr != nil || tree == nil {
 		return nil, nil
 	}
 
+	defer tree.Close()
 	root := tree.RootNode()
 	point := tree_sitter.Point{
 		Row:    uint(lineIdx),
@@ -238,29 +282,34 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 		return nil, nil
 	}
 
-	// 1. Root assignment hover (at the "root" keyword in root_assignment)
-	if node.Kind() == "root" && node.Parent() != nil && node.Parent().Kind() == "root_assignment" {
-		sample := h.getSample(uri)
-		if sample == nil {
-			return &protocol.Hover{Contents: protocol.MarkupContent{
-				Kind:  protocol.Markdown,
-				Value: "Provide a sample with `#!sample {\"key\": \"value\"}`",
-			}}, nil
+	if sample := h.getSample(uri); sample != nil {
+		statement := node
+		for statement != nil && !benthosStatement(statement.Kind()) {
+			statement = statement.Parent()
 		}
-		result, err := h.executor.ExecuteCumulative(h.parser, string(uri), sample.Value, text, lineIdx)
-		if err != nil || result == nil {
-			return nil, nil
+		if statement != nil && statement.Parent() != nil && statement.Kind() != "map_declaration" {
+			var result *benthos.PartialResult
+			var err error
+			if node.Kind() == "root" && node.Parent() != nil && node.Parent().Kind() == "root_assignment" {
+				if statement.Parent().Kind() == "source" {
+					result, err = h.executor.ExecuteThrough(h.parser, string(uri), sample, text, statement.StartByte())
+				} else {
+					result, err = h.executor.EvaluateExpression(h.parser, string(uri), sample, text, statement, node)
+				}
+			} else {
+				expression := hoverExpression(node)
+				if expression != nil {
+					result, err = h.executor.EvaluateExpression(h.parser, string(uri), sample, text, statement, expression)
+				}
+			}
+			if err == nil && result != nil {
+				v := valueHover(result, node)
+				if v.Range != nil {
+					*v.Range = rangeUTF16(text, *v.Range)
+				}
+				return v, nil
+			}
 		}
-		return &protocol.Hover{
-			Contents: protocol.MarkupContent{
-				Kind:  protocol.Markdown,
-				Value: fmt.Sprintf("```json\n%s\n```", result.Full),
-			},
-			Range: &protocol.Range{
-				Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
-				End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
-			},
-		}, nil
 	}
 
 	// 2. Functions & Methods hover
@@ -276,10 +325,10 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 		}
 		if found {
 			return &protocol.Hover{
-				Contents: doc,
+				Contents: protocol.NewHoverContents(doc.Kind, doc.Value),
 				Range: &protocol.Range{
-					Start: protocol.Position{Line: int(node.StartPosition().Row), Character: int(node.StartPosition().Column)},
-					End:   protocol.Position{Line: int(node.EndPosition().Row), Character: int(node.EndPosition().Column)},
+					Start: bytePosition(text, int(node.StartByte())),
+					End:   bytePosition(text, int(node.EndByte())),
 				},
 			}, nil
 		}
@@ -287,8 +336,6 @@ func (h *Handler) Hover(_ context.Context, params *protocol.HoverParams) (*proto
 
 	return nil, nil
 }
-
-
 
 func (h *Handler) baseDirForURI(uri protocol.DocumentURI) string {
 	h.importBasesMu.RLock()
@@ -318,11 +365,22 @@ func (h *Handler) updateSample(uri protocol.DocumentURI, text string) {
 	defer h.sampleDiagnosticsMu.Unlock()
 	if err == nil {
 		delete(h.sampleDiagnostics, uri)
+		if sample == nil {
+			severity := protocol.SeverityInformation
+			stem := "mapping"
+			if p, e := uriToPath(uri); e == nil {
+				stem = strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+			}
+			h.sampleDiagnostics[uri] = []protocol.Diagnostic{{Range: protocol.Range{}, Severity: &severity, Source: "bloblang sample", Message: stem + ".sample.json not found; add one to get hints"}}
+		}
 		return
 	}
 	severity := protocol.SeverityError
 	source := "bloblang"
 	line := sampleDirectiveLine(text)
+	if se, ok := err.(*benthos.SampleError); ok {
+		line = se.Line
+	}
 	h.sampleDiagnostics[uri] = []protocol.Diagnostic{{
 		Range:    protocol.Range{Start: protocol.Position{Line: line, Character: 0}, End: protocol.Position{Line: line, Character: 0}},
 		Severity: &severity,
@@ -373,12 +431,14 @@ func (h *Handler) publishExecDiagnostics(ctx context.Context, uri protocol.Docum
 	h.execDiagnosticsMu.RUnlock()
 
 	merged := append(base, exec...)
-	if h.client == nil {
+	if h.client == nil || strings.Contains(string(uri), "#bloblang-") {
 		return
 	}
-	if err := h.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: merged}); err != nil {
-		h.logger.Debug("publish diagnostics failed", "uri", uri, "err", err)
-	}
+	go func() {
+		if err := h.client.PublishDiagnostics(context.Background(), &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: merged}); err != nil {
+			h.logger.Debug("publish diagnostics failed", "uri", uri, "err", err)
+		}
+	}()
 }
 
 func sampleDirectiveLine(text string) int {

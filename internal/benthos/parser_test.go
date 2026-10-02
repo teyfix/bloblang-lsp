@@ -24,13 +24,17 @@ func TestBloblangParserCaching(t *testing.T) {
 	// Parse second time with exact same text should return identical tree instance
 	tree2, err := b.Parse(uri, doc1)
 	require.NoError(t, err)
-	assert.True(t, tree1 == tree2, "Should return the same cached tree instance")
+	assert.NotSame(t, tree1, tree2, "Callers own independent cloned trees")
+	assert.Equal(t, tree1.RootNode().ToSexp(), tree2.RootNode().ToSexp())
+	defer tree1.Close()
+	defer tree2.Close()
 
 	// Parse third time with changed text
 	doc2 := `root = this.name`
 	tree3, err := b.Parse(uri, doc2)
 	require.NoError(t, err)
 	require.NotNil(t, tree3)
+	defer tree3.Close()
 	assert.False(t, tree1 == tree3, "Should return a new tree instance after changes")
 
 	// Invalidate
@@ -137,10 +141,10 @@ func TestBloblangParserEdit(t *testing.T) {
 
 	// Let's call Edit
 	edit := tree_sitter.InputEdit{
-		StartByte: 0,
-		OldEndByte: uint(len(doc1)),
-		NewEndByte: 11,
-		StartPosition: tree_sitter.Point{Row: 0, Column: 0},
+		StartByte:      0,
+		OldEndByte:     uint(len(doc1)),
+		NewEndByte:     11,
+		StartPosition:  tree_sitter.Point{Row: 0, Column: 0},
 		OldEndPosition: tree_sitter.Point{Row: 0, Column: uint(len(doc1))},
 		NewEndPosition: tree_sitter.Point{Row: 0, Column: 11},
 	}

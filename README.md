@@ -1,142 +1,88 @@
 # Bloblang Language Server
 
-A [Language Server Protocol (LSP)](https://microsoft.github.io/language-server-protocol/) implementation for [Bloblang](https://docs.redpanda.com/redpanda-connect/guides/bloblang/about/), the powerful mapping language used in [Redpanda Connect](https://docs.redpanda.com/redpanda-connect/).
+A single Go LSP binary for Bloblang and mappings embedded in Redpanda Connect YAML. The VS Code extension in `../vscode-bloblang` bundles this binary and supplies language highlighting.
 
-![Inline sampling](docs/inline-sample-demo.gif)
+## Editor features
 
-## Features
+- Benthos syntax and semantic diagnostics, plus nonblocking sample problems.
+- Formatting that preserves tokens, comments and string content; malformed syntax is left unchanged.
+- Function and method documentation, sampled field/expression values, before-assignment `root` previews, and output inlay tooltips.
+- Definition and references for local variables and named maps (including literal `.apply("name")` calls), import paths and YAML `mapping: from "path"` links.
+- Function/method snippets, local variable/metadata completion, and sampled receiver guidance. Method filtering applies only when a valid sample yields a reliable receiver value; otherwise all static completions remain available.
+- YAML literal, folded, plain and quoted mappings under `mapping`, `request_map`, `result_map`, `args_mapping`, `fields_mapping`, `check` and `bloblang`, plus `${! ... }` expressions. Host YAML formatting is preserved; use the extension's explicit **Format Embedded Mappings** command.
 
-- **Real-time Inline Sampling** — Test your mappings live as you type
-  - Define JSON sample inputs directly in your file using the `#!sample {...}` directive, or from a file using `#!sample_from ...`
-  - Instantly see the evaluated output of your Bloblang transformations displayed inline above your code
-  - Iterate rapidly on complex mappings without needing to run external testing tools or CLIs
+Each embedded mapping is evaluated independently. A sample describes that mapping's input; the server does not infer intermediate processor inputs from a pipeline. Hover inside reached `if` branches retains branch conditions and preceding statements. Named maps and per-element/lambda contexts with no selected invocation do not show invented runtime values.
 
-- **Intelligent Code Completion** — Auto-complete Bloblang functions and methods with contextual awareness
-  - Function completions triggered after operators like `=`, `(`, `{`, `[`, `|`, `;`
-  - Method completions triggered after `.` (e.g., `this.foo.bar.`)
-  - Named-argument variants for functions/methods with optional parameters
-  - Visual status indicators: `[β]` beta, `[⚗]` experimental, `[⚠]` deprecated
+## Samples
 
-- **Rich Hover Documentation** — Detailed Markdown documentation on hover
-  - Function/method signatures with parameter types
-  - Status badges and deprecation warnings
-  - Inline examples with input/output tables
-  - Links to official [Redpanda documentation](https://docs.redpanda.com/redpanda-connect/guides/bloblang/)
-
-- **Real-time Diagnostics** — Live error detection and validation
-  - Parse error reporting with line/character positioning
-  - Custom import resolution for `import "./maps.blobl"` statements
-  - Diagnostics published via LSP `textDocument/publishDiagnostics`
-
-- **Snippet Support** — Tab-stop placeholders for rapid coding
-  - Positional arguments for required parameters
-  - Named arguments for optional parameters
-  - Smart defaults (e.g., `0` for numbers, `[]` for arrays)
-
-## Installation
-
-### Pre-built Binaries
-
-Download the latest release for your platform from the [Releases](https://github.com/teyfix/bloblang-lsp/releases) page:
-
-| Platform | Architectures |
-| -------- | ------------- |
-| Linux    | amd64, arm64  |
-| macOS    | amd64, arm64  |
-| Windows  | amd64, arm64  |
-
-### From Source
-
-Requires [Go](https://go.dev/) 1.26+ and [Task](https://taskfile.dev/):
-
-```bash
-git clone [https://github.com/teyfix/bloblang-lsp.git](https://github.com/teyfix/bloblang-lsp.git)
-cd bloblang-lsp
-task build
-```
-
-The binary will be available at `target/language-server-<os>-<arch>`.
-
-## Editor Configuration
-
-### Neovim (nvim-lspconfig)
-
-```lua
-require'lspconfig'.bloblang.setup{
-  cmd = { '/path/to/language-server-linux-amd64' },
-  filetypes = { 'bloblang', 'blobl' },
-  root_dir = require'lspconfig'.util.root_pattern('.git', 'Taskfile.yml'),
-}
-```
-
-### Emacs (lsp-mode)
-
-```elisp
-(lsp-register-client
- (make-lsp-client :new-connection (lsp-stdio-connection "/path/to/language-server-linux-amd64")
-                  :major-modes '(bloblang-mode)
-                  :server-id 'bloblang-lsp))
-```
-
-### Sublime Text (LSP)
+For `mapping.blobl`, the default is a sibling `mapping.sample.json`, `.yaml` or `.yml`. Files must have a `$bloblang` envelope:
 
 ```json
-{
-  "clients": {
-    "bloblang-lsp": {
-      "enabled": true,
-      "command": ["/path/to/language-server-linux-amd64"],
-      "selector": "source.bloblang"
-    }
-  }
-}
+{"$bloblang":{"input":{"name":"Ada"},"meta":{"topic":"people"}}}
 ```
 
-## Supported LSP Capabilities
+```yaml
+$bloblang:
+  input:
+    name: Ada
+  meta:
+    topic: people
+```
 
-| Feature            | Method                            | Status                           |
-| ------------------ | --------------------------------- | -------------------------------- |
-| Text Document Sync | `textDocument/didOpen`            | ✅ Full document sync            |
-|                    | `textDocument/didChange`          | ✅                               |
-|                    | `textDocument/didClose`           | ✅                               |
-| Completion         | `textDocument/completion`         | ✅ Functions, methods, variables |
-| Hover              | `textDocument/hover`              | ✅ Function/method docs          |
-| Diagnostics        | `textDocument/publishDiagnostics` | ✅ Parse errors                  |
+`input` is required and may be `null`. `meta` is optional and must be an object. Multiple siblings are ambiguous; select an entire sample explicitly. Missing default files produce an Information issue suggesting a sample; missing explicit files, malformed samples and bad directives produce Error issues. These issues disable dynamic previews and leave static diagnostics, formatting, completions and navigation available.
 
-## Architecture
+Leading comment directives are dispatched through an internal handler registry:
 
-The server is built on:
+```bloblang
+#!input {"name":"Ada"}
+#!meta {"topic":"people"}
+root.name = this.name.uppercase()
+```
 
-- **[glsp](https://github.com/tliron/glsp)** — Go LSP framework
-- **[Redpanda Connect](https://github.com/redpanda-data/connect)** — Bloblang parser and runtime
-- **[Benthos](https://github.com/redpanda-data/benthos)** — Core Bloblang environment
+`#!sample {input: {name: Ada}, meta: {topic: people}}` supplies an entire inline sample, without the `$bloblang` envelope. It overrides automatic sibling discovery, including invalid or ambiguous default files. Partial `input` and `meta` directives override their fields in a valid default sample, in document order.
 
-## Development
+`input_from`, `meta_from`, `sample_from` and `root_from` load JSON/YAML files. **Every `_from` file requires the `$bloblang` envelope**; each handler extracts its corresponding field. Paths resolve relative to the mapping or host YAML file. Sample/import changes refresh open mappings.
 
-```bash
-# Build for current platform
-task build:target OS=linux ARCH=amd64
+Multiline bodies remain valid Bloblang comments:
 
-# Build all platforms
-task build
+```bloblang
+#!sample |
+#| input:
+#|   name: Ada
+#| meta:
+#|   topic: people
+root.name = this.name
+```
 
-# Run tests
+A body ends when `#|` continuation lines end. Empty arguments, unknown directives and duplicate directive names are errors at the header. Directives belong before mapping statements.
+
+For `result_map` overlays, optional `$bloblang.root` or `#!root` seeds a separate output target. This selects Benthos `BloblangMutateFrom`, while `this` continues to read `input`:
+
+```bloblang
+#!input {"result":{"video":"ready"}}
+#!root {"provider_file_ref":"video"}
+root.status = this.result.get(root.provider_file_ref)
+```
+
+Metadata enters a public `service.Message`, so `meta("topic")` and `@topic` work. Metadata assignments update preview output metadata. Each prefix starts from a fresh sample. The first assignment's left-hand `root` tooltip shows the input (or explicit target); later left-hand tooltips show the prior prefix output. Right-hand `root` follows Benthos's current output semantics and can be uninitialized before the first assignment. `this` retains the input within that mapping.
+
+Migration from the old sample syntax: change `#!sample {"name":"Ada"}` to `#!input {"name":"Ada"}`, or `#!sample {"input":{"name":"Ada"}}`. Wrap old raw sample files under `$bloblang.input`.
+
+## Build and package
+
+Requires Go 1.26.3+, a C compiler, and the sibling `../tree-sitter-bloblang` checkout. The relative `go.mod` replacement picks up the current grammar. Tree-sitter's Go binding still uses generated C; the bundled extension binary needs no source checkout or compiler at runtime.
+
+```sh
 go test ./...
-
-# Release (requires GitHub token)
-git tag v1.0.0
-git push origin v1.0.0
+go build -a -o target/bloblang-lsp ./cmd/bloblang-lsp
 ```
 
-## Contributing
+Use `-a` after regenerating the sibling grammar: its included `parser.c` lives outside the Go package directory and Go's normal package cache can miss the change. In `../vscode-bloblang`, run `bun run package` to build a platform VSIX with the binary included. The extension can also launch a configured external binary for development.
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+To verify a private mapping corpus without changing files:
 
-## License
+```sh
+BLOBLANG_CORPUS_LIST=/path/to/newline-delimited-files.txt go test ./internal/lsp -run TestFormatterCorpus -v
+```
 
-[MIT](./LICENSE)
-
-## Acknowledgments
-
-- [Redpanda Data](https://redpanda.com/) for the excellent Bloblang language and documentation
-- The [Language Server Protocol](https://microsoft.github.io/language-server-protocol/) team at Microsoft
+The server implements full document sync, completion, hover, formatting, definition, references, diagnostics, inlay hints and code lenses. Configuration uses `.bloblangrc` and `BLOBLANG_LSP_*` variables; see `internal/config/config.go`. Both CLI entrypoints write logs to stderr and speak LSP on stdin/stdout.

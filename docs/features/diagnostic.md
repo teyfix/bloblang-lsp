@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Feature Specification: Diagnostic Feature (`diagnostic.go`)
 
 This document specifies the design, AST evaluation steps, and Benthos compilation rules of the **Diagnostic** feature (`internal/feature/diagnostic/`).

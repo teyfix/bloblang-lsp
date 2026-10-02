@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Feature Specification: Sample Feature (`sample.go`)
 
 This document specifies the design, cumulative execution caching, and multi-attribute output rules of the **Sample** feature (`internal/feature/sample/`).

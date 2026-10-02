@@ -2,160 +2,284 @@ package benthos
 
 import (
 	"encoding/json"
-	"strconv"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/redpanda-data/benthos/v4/public/bloblang"
-	"github.com/teyfix/bloblang-lsp/internal/ascii"
+	"github.com/redpanda-data/benthos/v4/public/service"
 	"github.com/teyfix/bloblang-lsp/internal/config"
-	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
+	tree_sitter "github.com/tree-sitter/go-tree-sitter"
 )
 
 type PartialResult struct {
 	Text      string
 	Truncated bool
 	Full      string
+	Value     any
+	Meta      map[string]any
+	Deleted   bool
 }
-
 type Executor struct {
-	cache  *expirable.LRU[string, *PartialResult]
 	benv   *bloblang.Environment
 	config *config.Config
 }
 
 func NewExecutor(benv *bloblang.Environment, cfg *config.Config) *Executor {
-	size := cfg.PartialExecCacheSize
-	if size <= 0 {
-		size = 1
-	}
-	return &Executor{
-		cache:  expirable.NewLRU[string, *PartialResult](size, nil, cfg.PartialExecCacheTTL),
-		benv:   benv,
-		config: cfg,
-	}
+	return &Executor{benv: benv, config: cfg}
 }
-
 func isStatementKind(kind string) bool {
 	switch kind {
-	case "root_assignment", "let_assignment", "meta_assignment", "map_declaration", "import_statement":
+	case "root_assignment", "let_assignment", "meta_assignment", "map_declaration", "import_statement", "if_statement":
 		return true
 	}
 	return false
 }
-
-// ExecuteCumulative executes all root-assignment statements from the beginning of the
-// document through throughLine (inclusive) and returns the resulting value.
-//
-// throughLine == -1 is a special case meaning "before any assignment"; in that case
-// the raw sample is returned as-is (marshalled to JSON).
-//
-// This is used by code lenses (pass throughLine = lineIdx-1 to show the input state
-// before the line) and inlay hints (pass throughLine = lineIdx to show the output
-// state after the line).
-func (e *Executor) ExecuteCumulative(parser *Bloblang, uri string, sample interface{}, docText string, throughLine int) (*PartialResult, error) {
-	if len(docText) > e.config.MaxInlineDocumentBytes {
-		return nil, nil
-	}
-
-	key := uri + ":cumulative:" + strconv.Itoa(throughLine)
-	if result, ok := e.cache.Get(key); ok {
-		return result, nil
-	}
-
-	// Special case: before any assignment — return the raw sample.
-	if throughLine < 0 {
-		encoded, err := json.Marshal(sample)
-		if err != nil {
-			return nil, err
-		}
-		full := string(encoded)
-		text := full
-		truncated := false
-		if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
-			full = strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
-				Width:    e.config.MaxInlineResultBytes,
-				Prefix:   "",
-				Indent:   "  ",
-				SortKeys: false,
-			})), "\n")
-			text = text[:e.config.MaxInlineResultBytes] + ascii.Ellipsis
-			truncated = true
-		}
-		result := &PartialResult{Text: text, Truncated: truncated, Full: full}
-		e.cache.Add(key, result)
-		return result, nil
-	}
-
-	tree, err := parser.Parse(uri, docText)
-	if err != nil {
-		return nil, err
-	}
-
-	// Collect all statement nodes whose start row is <= throughLine.
-	root := tree.RootNode()
-	var snippetParts []string
-	for i := uint(0); i < root.ChildCount(); i++ {
-		child := root.Child(i)
-		if !isStatementKind(child.Kind()) {
-			continue
-		}
-		if int(child.StartPosition().Row) <= throughLine {
-			snippetParts = append(snippetParts, child.Utf8Text([]byte(docText)))
-		}
-	}
-
-	if len(snippetParts) == 0 {
-		// No root assignments up to throughLine — return raw sample.
-		return e.ExecuteCumulative(parser, uri, sample, docText, -1)
-	}
-
-	snippet := strings.Join(snippetParts, "\n")
-	parsed, err := e.benv.Parse(snippet)
-	if err != nil {
-		return nil, err
-	}
-
-	value, err := parsed.Query(sample)
-	if err != nil {
-		return nil, err
-	}
+func (e *Executor) result(value any, meta map[string]any, deleted bool) (*PartialResult, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
-
 	full := string(encoded)
-	text := full
+	if deleted {
+		full = "deleted()"
+	}
+	short := full
 	truncated := false
-	if e.config.MaxInlineResultBytes >= 0 && len(text) > e.config.MaxInlineResultBytes {
-		full = strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
-			Width:    e.config.MaxInlineResultBytes,
-			Prefix:   "",
-			Indent:   "  ",
-			SortKeys: false,
-		})), "\n")
-		text = text[:e.config.MaxInlineResultBytes] + ascii.Ellipsis
+	if n := e.config.MaxInlineResultBytes; n >= 0 && len(short) > n {
+		for n > 0 && !utf8.RuneStart(short[n]) {
+			n--
+		}
+		short = short[:n] + "…"
 		truncated = true
 	}
-
-	result := &PartialResult{Text: text, Truncated: truncated, Full: full}
-	e.cache.Add(key, result)
-	return result, nil
+	return &PartialResult{Text: short, Full: full, Truncated: truncated, Value: value, Meta: meta, Deleted: deleted}, nil
+}
+func sampleOf(v any) *Sample {
+	if s, ok := v.(*Sample); ok {
+		return s
+	}
+	return &Sample{Value: v}
+}
+func (e *Executor) execute(uri string, sample *Sample, snippet string) (*PartialResult, error) {
+	env := e.benv.WithCustomImporter(func(name string) ([]byte, error) {
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(documentDir(uri), name)
+		}
+		return os.ReadFile(name)
+	})
+	snippet += "\nroot = match { root.type() == \"delete\" => deleted(), root.type() == \"nothing\" => {\"__bloblang_lsp_output\": this}, _ => {\"__bloblang_lsp_output\": root} }"
+	parsed, err := env.Parse(snippet)
+	if err != nil {
+		return nil, err
+	}
+	msg := service.NewMessage(nil)
+	msg.SetStructuredMut(cloneValue(sample.Value))
+	for k, v := range sample.Meta {
+		msg.MetaSetMut(k, cloneValue(v))
+	}
+	var out *service.Message
+	if sample.HasRoot {
+		target := service.NewMessage(nil)
+		target.SetStructuredMut(cloneValue(sample.Root))
+		out, err = target.BloblangMutateFrom(parsed, msg)
+	} else {
+		out, err = msg.BloblangQuery(parsed)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return e.result(nil, nil, true)
+	}
+	value, err := out.AsStructured()
+	if err != nil {
+		return nil, err
+	}
+	if obj, ok := value.(map[string]any); ok {
+		value = obj["__bloblang_lsp_output"]
+	}
+	meta := map[string]any{}
+	_ = out.MetaWalkMut(func(k string, v any) error { meta[k] = v; return nil })
+	return e.result(value, meta, false)
+}
+func cloneValue(v any) any {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	if json.Unmarshal(b, &out) != nil {
+		return v
+	}
+	return out
+}
+func documentDir(uri string) string {
+	if i := strings.Index(uri, "#"); i >= 0 {
+		uri = uri[:i]
+	}
+	u, err := urlPath(uri)
+	if err == nil {
+		return filepath.Dir(u)
+	}
+	return "."
 }
 
-func (e *Executor) InvalidateDocument(uri string) {
-	prefix := uri + ":"
-	for _, key := range e.cache.Keys() {
-		if strings.HasPrefix(key, prefix) {
-			e.cache.Remove(key)
+// ExecuteThrough executes complete statements ending before the byte cutoff.
+func (e *Executor) ExecuteThrough(parser *Bloblang, uri string, sample *Sample, text string, cutoff uint) (*PartialResult, error) {
+	if len(text) > e.config.MaxInlineDocumentBytes {
+		return nil, nil
+	}
+	tree, err := parser.Parse(uri, text)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
+	var parts []string
+	root := tree.RootNode()
+	for i := uint(0); i < root.ChildCount(); i++ {
+		n := root.Child(i)
+		if isStatementKind(n.Kind()) && (n.EndByte() <= cutoff || n.Kind() == "map_declaration" || n.Kind() == "import_statement") {
+			parts = append(parts, n.Utf8Text([]byte(text)))
 		}
 	}
+	if len(parts) == 0 {
+		if sample.HasRoot {
+			return e.result(sample.Root, sample.Meta, false)
+		}
+		return e.result(sample.Value, sample.Meta, false)
+	}
+	return e.execute(uri, sample, strings.Join(parts, "\n"))
+}
+func (e *Executor) ExecuteCumulative(parser *Bloblang, uri string, value any, text string, line int) (*PartialResult, error) {
+	sample := sampleOf(value)
+	if line < 0 {
+		if sample.HasRoot {
+			return e.result(sample.Root, sample.Meta, false)
+		}
+		return e.result(sample.Value, sample.Meta, false)
+	}
+	tree, err := parser.Parse(uri, text)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
+	var cutoff uint
+	root := tree.RootNode()
+	for i := uint(0); i < root.ChildCount(); i++ {
+		n := root.Child(i)
+		if isStatementKind(n.Kind()) && int(n.StartPosition().Row) <= line {
+			cutoff = n.EndByte()
+		}
+	}
+	return e.ExecuteThrough(parser, uri, sample, text, cutoff)
 }
 
+// EvaluateExpression appends a synthetic assignment after preceding complete statements.
+// The runtime evaluates the synthetic RHS against the preceding output state.
+func (e *Executor) EvaluateExpression(parser *Bloblang, uri string, sample *Sample, text string, statement, expr *tree_sitter.Node) (*PartialResult, error) {
+	if statement == nil || expr == nil {
+		return nil, nil
+	}
+	top := statement
+	for top.Parent() != nil && top.Parent().Kind() != "source" {
+		top = top.Parent()
+	}
+	var parts []string
+	tree, err := parser.Parse(uri, text)
+	if err != nil {
+		return nil, err
+	}
+	defer tree.Close()
+	root := tree.RootNode()
+	for i := uint(0); i < root.ChildCount(); i++ {
+		n := root.Child(i)
+		if isStatementKind(n.Kind()) && (n.EndByte() <= top.StartByte() || n.Kind() == "map_declaration" || n.Kind() == "import_statement") {
+			parts = append(parts, n.Utf8Text([]byte(text)))
+		}
+	}
+
+	expression := expr.Utf8Text([]byte(text))
+	// Benthos evaluates the assignment RHS before replacing root. Appending a
+	// synthetic assignment therefore preserves current root reads without source rewrites.
+	if expr.Kind() == "root" {
+		expression = "if root.type() == \"nothing\" { this } else { root }"
+	}
+	var replacement string
+	marker := "__bloblang_lsp_hover"
+	for strings.Contains(text, marker) {
+		marker += "_"
+	}
+	replacement += "root = {\"" + marker + "\": " + expression + "}"
+	if top.Id() == statement.Id() {
+		parts = append(parts, replacement)
+	} else {
+		parts = append(parts, trimBranch(top, statement, replacement, text))
+	}
+	result, err := e.execute(uri, sample, strings.Join(parts, "\n"))
+	if err != nil || result == nil {
+		return result, err
+	}
+	obj, ok := result.Value.(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	value, exists := obj[marker]
+	if !exists {
+		return nil, nil
+	}
+	return e.result(value, result.Meta, false)
+
+}
+
+func (e *Executor) InvalidateDocument(string) {}
 func looksIncomplete(err error) bool {
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unexpected eof") ||
-		strings.Contains(msg, "unexpected end") ||
-		strings.Contains(msg, "unterminated")
+	return strings.Contains(msg, "unexpected eof") || strings.Contains(msg, "unexpected end") || strings.Contains(msg, "unterminated")
+}
+func urlPath(uri string) (string, error) {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return "", err
+	}
+	return filepath.FromSlash(u.Path), nil
+}
+
+func containsNode(parent, node *tree_sitter.Node) bool {
+	return parent != nil && parent.StartByte() <= node.StartByte() && parent.EndByte() >= node.EndByte()
+}
+func trimBranch(n, target *tree_sitter.Node, replacement, text string) string {
+	if n.Id() == target.Id() {
+		return replacement
+	}
+	if n.Kind() == "if_statement" {
+		condition := n.ChildByFieldName("condition")
+		consequence := n.ChildByFieldName("consequence")
+		alternative := n.ChildByFieldName("alternative")
+		left := ""
+		right := ""
+		if containsNode(consequence, target) {
+			left = trimBranch(consequence, target, replacement, text)
+		}
+		if containsNode(alternative, target) {
+			right = trimBranch(alternative, target, replacement, text)
+		}
+		return "if " + condition.Utf8Text([]byte(text)) + " {\n" + left + "\n} else {\n" + right + "\n}"
+	}
+	var parts []string
+	for i := uint(0); i < n.ChildCount(); i++ {
+		child := n.Child(i)
+		if !isStatementKind(child.Kind()) {
+			continue
+		}
+		if child.EndByte() <= target.StartByte() {
+			parts = append(parts, child.Utf8Text([]byte(text)))
+		} else if containsNode(child, target) {
+			parts = append(parts, trimBranch(child, target, replacement, text))
+			break
+		}
+	}
+	return strings.Join(parts, "\n")
 }

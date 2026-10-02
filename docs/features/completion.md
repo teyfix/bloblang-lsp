@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Feature Specification: Autocomplete Completion Feature (`completion.go`)
 
 This document specifies the design, trigger character parsing, and context-aware filtering of the **Completion** feature (`internal/feature/completion/`).

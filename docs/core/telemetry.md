@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Module Specification: Telemetry & Logging (`logger.go`)
 
 This document specifies the design, logging standards, and constraints of the **Telemetry** package (`internal/telemetry/logger.go`).

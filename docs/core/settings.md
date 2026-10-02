@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Module Specification: Settings (`settings.go`)
 
 This document specifies the design, properties, and configuration lifecycle of the **Settings** package (`internal/settings/settings.go`).

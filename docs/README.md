@@ -1,33 +1,7 @@
-# Bloblang LSP Documentation Portal
+# Bloblang LSP
 
-Welcome to the documentation portal for the modular `bloblang-lsp` server. This portal acts as the source of truth for the server's architectural design, core systems, and feature modules.
+The shipped server is `cmd/bloblang-lsp` and `internal/lsp`. The older `cmd/language-server` command uses the same implementation. One handler tracks open documents and answers LSP requests; it uses the Benthos public parser/runtime and Tree-sitter for source boundaries. The unfinished modular actor rewrite has been removed.
 
-Before implementing any changes, refactoring, or new features, review the corresponding package blueprints documented below.
+See the repository [README](../README.md) for features, samples, packaging and validation. Source is the reference for behavior. YAML mappings are extracted into independent document regions and mapped back to host positions; the server does not simulate a YAML processor pipeline. Named map definitions and lambda bodies have no unique runtime invocation context, so ambiguous sampled hovers are omitted.
 
----
-
-## 🗺️ Portal Directory Map
-
-### 1. Architectural Foundation & Concurrency
-These blueprints specify the core mutex-free concurrency model and generic interfaces of the language server:
-* **[docs/concurrency.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/concurrency.md)**: Describes the **hierarchical actor model** ($Handler \rightarrow DocumentActor \rightarrow Features$) and transactional **nonces**.
-* **[docs/generic_api.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/generic_api.md)**: Defines the **`AttributeProducer` API**, concurrent reduction, direct sync query channels, and the zero-context-cancellation rules.
-
----
-
-### 2. Core Modules (`docs/core/`)
-These specifications document the structural plumbing and lifecycle bootstrap layers of the server:
-* **[docs/core/main.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/core/main.md)**: Standardizes entrypoint bootstrapping, logger initialization, capability configuration, and startup priority.
-* **[docs/core/settings.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/core/settings.md)**: Defines configuration schema parameters, precedence rules, and defaults.
-* **[docs/core/telemetry.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/core/telemetry.md)**: Establishes `slog` structured logging standards and rules governing Stdio isolation.
-* **[docs/core/handler.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/core/handler.md)**: Captures the thin gateway interface adapter that bridges RPC requests to actor mailboxes, stripped of all feature logic.
-* **[docs/core/document.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/core/document.md)**: Specifies the `DocumentActor` structure as the exclusive orchestrator and keeper of active states (`lastDiagnostics`, `lastInlayHints`, `lastCodeLenses`).
-
----
-
-### 3. Feature Engines (`docs/features/`)
-These documents outline the localized execution engines, AST logic, and Benthos reflection rules for the server capabilities:
-* **[docs/features/diagnostic.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/features/diagnostic.md)**: Outlines AST syntax checking, Benthos semantic environment parses, and file import warning resolutions.
-* **[docs/features/sample.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/features/sample.md)**: Outlines sample directives extraction (`#!sample`/`#!sample_from`), live cumulative execution caching, inlay hints, and command-trigger code lenses.
-* **[docs/features/hover.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/features/hover.md)**: Outlines cursor node analysis, pre-built static documentation lookups, and cumulative state evaluations when hovering over `root`.
-* **[docs/features/completion.md](file:///home/dixie/git/teyfix/bloblang-lsp/docs/features/completion.md)**: Outlines context-aware auto-completion lists (trigger characters: `.`, `@`, `$`) that distinguish methods from standard functions.
+Logs go to stderr. Stdout is reserved for JSON-RPC. Diagnostics publish asynchronously because the go-lsp transport must continue reading client responses. Client refresh requests are sent only when the client advertises support. go-lsp 0.2.5 includes the required `result: null` JSON-RPC response fix.

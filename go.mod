@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/owenrumney/go-lsp v0.2.2
+	github.com/owenrumney/go-lsp v0.2.5
 	github.com/redpanda-data/benthos/v4 v4.73.0
 	github.com/redpanda-data/connect/v4 v4.92.0
 	github.com/spf13/viper v1.21.0
@@ -149,3 +149,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/teyfix/tree-sitter-bloblang => ../tree-sitter-bloblang

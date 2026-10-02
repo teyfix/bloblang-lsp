@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Module Specification: Language Server Entrypoint (`main.go`)
 
 This document specifies the design, responsibilities, constraints, and sequence flows of the language server entrypoint (`cmd/language-server/main.go`).

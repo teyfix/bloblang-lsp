@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # `github.com/teyfix/tree-sitter-bloblang/bindings/go` — Bloblang Grammar
 
 **Import path:** `github.com/teyfix/tree-sitter-bloblang/bindings/go` (alias: `tree_sitter_bloblang`)

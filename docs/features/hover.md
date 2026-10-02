@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # Feature Specification: Hover Feature (`hover.go`)
 
 This document specifies the design, AST node identification, and live execution evaluation of the **Hover** feature (`internal/feature/hover/`).

@@ -873,6 +873,8 @@ github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJw
 github.com/opencontainers/image-spec v1.1.1/go.mod h1:qpqAh3Dmcf36wStyyWU+kCeDgrGnAve2nCC8+7h8Q0M=
 github.com/owenrumney/go-lsp v0.2.2 h1:xXT2lnGrJfM0U+JmoTK8lh40al5oFiMQ2yvIZowKydE=
 github.com/owenrumney/go-lsp v0.2.2/go.mod h1:+3+U1+SZ+wgGXHaAPPieRORYiSkritQBeHzoSCiwL34=
+github.com/owenrumney/go-lsp v0.2.5 h1:PMeCbWYSCGmW1rc5g6RESbZXbZLEziqbThxjulGq4eI=
+github.com/owenrumney/go-lsp v0.2.5/go.mod h1:+3+U1+SZ+wgGXHaAPPieRORYiSkritQBeHzoSCiwL34=
 github.com/parquet-go/bitpack v1.0.0 h1:AUqzlKzPPXf2bCdjfj4sTeacrUwsT7NlcYDMUQxPcQA=
 github.com/parquet-go/bitpack v1.0.0/go.mod h1:XnVk9TH+O40eOOmvpAVZ7K2ocQFrQwysLMnc6M/8lgs=
 github.com/parquet-go/jsonlite v1.5.0 h1:ulS7lNWdPwiqDMLzTiXHYmIUhu99mavZh2iAVdXet3g=

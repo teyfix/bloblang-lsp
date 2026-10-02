@@ -1,3 +1,5 @@
+> Historical design notes from an abandoned rewrite. The shipped implementation is `internal/lsp`; see [the current README](../README.md) and source for behavior. These notes are not implementation requirements.
+
 # `github.com/tree-sitter/go-tree-sitter` — Tree-sitter Go Bindings
 
 **Import path:** `github.com/tree-sitter/go-tree-sitter` (alias: `tree_sitter`)

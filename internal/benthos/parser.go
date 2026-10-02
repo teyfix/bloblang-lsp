@@ -107,7 +107,7 @@ func (b *Bloblang) Parse(uri string, document string) (*tree_sitter.Tree, error)
 	defer b.mu.Unlock()
 
 	if cached, ok := b.trees[uri]; ok && cached.text == document {
-		return cached.tree, nil
+		return cached.tree.Clone(), nil
 	}
 
 	var oldTree *tree_sitter.Tree
@@ -137,7 +137,7 @@ func (b *Bloblang) Parse(uri string, document string) (*tree_sitter.Tree, error)
 		tree: tree,
 		text: document,
 	}
-	return tree, nil
+	return tree.Clone(), nil
 }
 
 func (b *Bloblang) InvalidateDocument(uri string) {

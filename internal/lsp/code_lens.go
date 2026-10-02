@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/dustin/go-humanize"
@@ -13,6 +12,23 @@ import (
 
 func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
 	uri := params.TextDocument.URI
+	if yamlDocument(uri) && !strings.Contains(string(uri), "#bloblang-") {
+		host, _ := h.documents.Text(uri)
+		out := []protocol.CodeLens{}
+		for _, r := range h.regions(uri) {
+			cp := *params
+			cp.TextDocument.URI = r.uri
+			vals, err := h.CodeLens(ctx, &cp)
+			if err != nil {
+				continue
+			}
+			for _, v := range vals {
+				v.Range = r.hostRange(host, v.Range)
+				out = append(out, v)
+			}
+		}
+		return out, nil
+	}
 	sample := h.getSample(uri)
 	if sample == nil {
 		return []protocol.CodeLens{}, nil
@@ -31,56 +47,30 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 		return []protocol.CodeLens{}, nil
 	}
 
+	defer tree.Close()
 	root := tree.RootNode()
 
-	// 1. Traverse comments to find sample_from directives
-	for i := uint(0); i < root.ChildCount(); i++ {
-		child := root.Child(i)
-		if child.Kind() != "comment" {
-			break
-		}
-		commentText := child.Utf8Text([]byte(text))
-		lineText := strings.TrimSpace(commentText)
-		if strings.HasPrefix(lineText, "#!sample_from ") {
-			rel := strings.TrimSpace(strings.TrimPrefix(lineText, "#!sample_from "))
-			if rel != "" {
-				resolved := filepath.Join(h.baseDirForURI(uri), rel)
-				uriStr := "file://" + filepath.ToSlash(resolved)
-				if !strings.HasPrefix(uriStr, "file:///") {
-					uriStr = "file:///" + strings.TrimPrefix(filepath.ToSlash(resolved), "/")
-				}
-				row := int(child.StartPosition().Row)
-				lenses = append(lenses, protocol.CodeLens{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: row, Character: 0},
-						End:   protocol.Position{Line: row, Character: 0},
-					},
-					Command: &protocol.Command{
-						Title:     "[Open Sample]",
-						Command:   "bloblang-lsp.openFile",
-						Arguments: []json.RawMessage{rawJSON(uriStr)},
-					},
-				})
-			}
-		}
+	for _, path := range sample.Dependencies {
+		row := sample.DependencyLines[path]
+		lenses = append(lenses, protocol.CodeLens{Range: protocol.Range{Start: protocol.Position{Line: row}, End: protocol.Position{Line: row}}, Command: &protocol.Command{Title: "[Open Sample]", Command: "bloblang-lsp.openFile", Arguments: []json.RawMessage{rawJSON(string(fileURI(path)))}}})
 	}
 
 	// 2. Traverse statements to generate statement level Show Input / Show Output code lenses
 	for i := uint(0); i < root.ChildCount(); i++ {
 		child := root.Child(i)
-		if child.Kind() != "root_assignment" {
+		if child.Kind() != "root_assignment" && child.Kind() != "if_statement" {
 			continue
 		}
 
 		startRow := int(child.StartPosition().Row)
 
 		// Calculate cumulative state BEFORE this assignment
-		resultBefore, errBefore := h.executor.ExecuteCumulative(h.parser, string(uri), sample.Value, text, startRow-1)
+		resultBefore, errBefore := h.executor.ExecuteThrough(h.parser, string(uri), sample, text, child.StartByte())
 		if errBefore != nil {
 			continue
 		}
 
-		if resultBefore != nil && resultBefore.Truncated {
+		if resultBefore != nil && !resultBefore.Deleted && resultBefore.Truncated {
 			lenses = append(lenses, protocol.CodeLens{
 				Range: protocol.Range{
 					Start: protocol.Position{Line: startRow, Character: 0},
@@ -95,7 +85,7 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 		}
 
 		// Calculate cumulative state AFTER this assignment
-		resultAfter, errAfter := h.executor.ExecuteCumulative(h.parser, string(uri), sample.Value, text, startRow)
+		resultAfter, errAfter := h.executor.ExecuteThrough(h.parser, string(uri), sample, text, child.EndByte())
 		if errAfter != nil {
 			execErrs = append(execErrs, protocol.Diagnostic{
 				Range: protocol.Range{
@@ -109,7 +99,7 @@ func (h *Handler) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 			continue
 		}
 
-		if resultAfter != nil && resultAfter.Truncated {
+		if resultAfter != nil && !resultAfter.Deleted && resultAfter.Truncated {
 			lenses = append(lenses, protocol.CodeLens{
 				Range: protocol.Range{
 					Start: protocol.Position{Line: startRow, Character: 0},
