@@ -9,13 +9,12 @@ import (
 	"unicode/utf8"
 
 	protocol "github.com/owenrumney/go-lsp/lsp"
-	pretty "github.com/teyfix/bloblang-lsp/internal/tidwall"
 )
 
-func shortValue(val interface{}, maxBytes int) (string, string) {
+func shortValue(val interface{}, maxBytes int) string {
 	encoded, err := json.Marshal(val)
 	if err != nil {
-		return "", ""
+		return ""
 	}
 	full := string(encoded)
 	text := full
@@ -25,13 +24,7 @@ func shortValue(val interface{}, maxBytes int) (string, string) {
 		}
 		text = text[:maxBytes] + "…"
 	}
-	prettyPrinted := strings.TrimRight(string(pretty.PrettyOptions(encoded, &pretty.Options{
-		Width:    maxBytes,
-		Prefix:   "",
-		Indent:   "  ",
-		SortKeys: false,
-	})), "\n")
-	return text, prettyPrinted
+	return text
 }
 
 func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
@@ -85,7 +78,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 		commentText := child.Utf8Text([]byte(text))
 		lineText := strings.TrimSpace(commentText)
 		if strings.HasPrefix(lineText, "#!sample ") || strings.HasPrefix(lineText, "#!sample_from ") {
-			shortVal, _ := shortValue(sample.Value, h.config.MaxInlineResultBytes)
+			shortVal := shortValue(sample.Value, h.config.MaxInlineResultBytes)
 			hints = append(hints, protocol.InlayHint{
 				Position: protocol.Position{
 					Line:      int(child.EndPosition().Row),

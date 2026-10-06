@@ -163,6 +163,8 @@ root = this.cast.map_each(c -> c.
 
 Hover values, inlay tooltips and Show Output share YAML previews by default. Set `preview.format` to `json` for compact JSON. Both use `formatter.printWidth`; inline labels have their own size limit. An unset `env()` is null, so `.catch(...)` alone does not satisfy the environment rule. Use `.or(default)`, `.or(throw("required"))`, or `.not_null().catch(throw("required"))`.
 
+Large hover and inlay tooltip previews are capped at 4 KiB / 60 lines, with limits applied to collections and long strings before YAML formatting. A **Preview truncated** notice appears at the top; **Show Input / Show Output** opens the complete message. Evaluation uses the full sample. See [hover preview limits](docs/features/hover.md).
+
 ### Lint suggestions and Quick Fixes
 
 Lint suggestions account for object merge/replacement, missing fields and effectful evaluation. Grouped assignments, projections, deletion and existence checks are advisory. Consecutive `.without()` calls with literal arguments have an explicit Quick Fix. The server does not implement `source.fixAll`; formatting does not apply lint refactors. See [lint behavior and fixes](docs/features/lint.md).
