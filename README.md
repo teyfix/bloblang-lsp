@@ -22,6 +22,7 @@ Highlighting, diagnostics, completion, hover and navigation work inside recogniz
 - Formatting that preserves tokens, comments and string content; malformed syntax is left unchanged.
 - Function and method documentation, sampled field/expression values, before-assignment `root` previews, and output inlay tooltips.
 - Definition and references for local variables and named maps (including literal `.apply("name")` calls), import paths and YAML `mapping: from "path"` links.
+- Rename local variables, lambda parameters and named maps with **F2** in VS Code, including embedded YAML and imported maps. See [rename support and scope](docs/features/rename.md).
 - Function/method snippets, local variable/metadata completion, and sampled receiver guidance. Method filtering applies only when a valid sample yields a reliable receiver value; otherwise all static completions remain available.
 - YAML literal, folded, plain and quoted mappings under `mapping`, `request_map`, `result_map`, `args_mapping`, `fields_mapping`, `check` and `bloblang`, plus `${! ... }` expressions. Host YAML formatting is preserved; use the extension's explicit **Format Embedded Mappings** command.
 
@@ -147,7 +148,16 @@ See the [generated rule reference](docs/features/lint-rules.md) for defaults and
 
 ### Formatting and previews
 
-Use **Format Document** in a Bloblang file or **Bloblang: Format Embedded Mappings** in YAML. The formatter preserves tokens, comments, string contents and explicit parentheses. It collapses short expression groups, expands longer groups, and verifies its output with Tree-sitter and Benthos before offering edits. YAML mappings preserve short scalar styles where valid; multiline output uses literal blocks. Formatting does not apply lint refactors.
+Use **Format Document** in a Bloblang file or **Bloblang: Format Embedded Mappings** in YAML. The formatter preserves tokens, comments, string contents and explicit parentheses. It collapses short expression groups, expands longer groups, and verifies its output with Tree-sitter and Benthos before offering edits. Long method chains break after dots; lambda bodies can wrap independently while short calls such as `.join("; ")` stay together. YAML mappings preserve short scalar styles where valid; multiline output uses literal blocks. Formatting does not apply lint refactors.
+
+```bloblang
+root = this.cast.map_each(c -> c.
+  with("character", "name").
+  values().
+  filter(cn -> cn.or("") != "").
+  join(" – ")
+).join("; ")
+```
 
 ![Formatting a Bloblang object in VS Code to fit the configured print width](docs/demos/formatting.gif)
 

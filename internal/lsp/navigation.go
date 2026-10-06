@@ -55,6 +55,25 @@ func symbols(root *tree_sitter.Node, text string) []symbol {
 			if name != nil {
 				out = append(out, symbol{name.Utf8Text([]byte(text)), "variable", n, scopeOf(n), false})
 			}
+		case "lambda":
+			if name := n.ChildByFieldName("param"); name != nil {
+				out = append(out, symbol{name.Utf8Text([]byte(text)), "lambda", name, n, true})
+			}
+		case "identifier":
+			// Bare identifiers are lambda references only in expression positions;
+			// method names, object keys and field names belong to other namespaces.
+			p := n.Parent()
+			if p == nil {
+				return
+			}
+			for _, field := range []string{"name", "param", "method", "function", "field", "key", "path"} {
+				if c := p.ChildByFieldName(field); c != nil && c.Id() == n.Id() {
+					return
+				}
+			}
+			if p.Kind() != "variable_ref" && p.Kind() != "meta_ref" {
+				out = append(out, symbol{n.Utf8Text([]byte(text)), "lambda", n, scopeOf(n), false})
+			}
 		case "method_call":
 			method := n.ChildByFieldName("method")
 			if method != nil && method.Utf8Text([]byte(text)) == "apply" {
@@ -93,31 +112,43 @@ func nodeLocation(uri protocol.DocumentURI, text string, n *tree_sitter.Node) pr
 }
 func sameScope(a, b *tree_sitter.Node) bool { return a != nil && b != nil && a.Id() == b.Id() }
 func visibleDefinition(ss []symbol, s *symbol) *symbol {
-	var best *symbol
-	for i := range ss {
-		d := &ss[i]
-		if !d.declaration || d.name != s.name || d.kind != s.kind {
-			continue
-		}
-		if s.kind == "map" {
-			return d
-		}
-		if d.node.StartByte() > s.node.StartByte() {
-			continue
-		}
+	if s.declaration {
+		return s
+	}
+	// Prefer the nearest scope before considering declaration order.
+	if s.kind != "map" {
 		for scope := s.scope; scope != nil; scope = scopeOf(scope) {
-			if sameScope(scope, d.scope) {
+			var best *symbol
+			for i := range ss {
+				d := &ss[i]
+				if !d.declaration || d.name != s.name || d.kind != s.kind || !sameScope(scope, d.scope) || d.node.StartByte() > s.node.StartByte() {
+					continue
+				}
+				// A let binding isn't in scope inside its own initializer.
+				if p := d.node.Parent(); p.Kind() == "let_assignment" && s.node.EndByte() <= p.EndByte() {
+					continue
+				}
 				if best == nil || d.node.StartByte() > best.node.StartByte() {
 					best = d
 				}
-				break
+			}
+			if best != nil {
+				return best
 			}
 			if scope.Kind() == "source" || scope.Kind() == "map_declaration" {
 				break
 			}
 		}
+		return nil
 	}
-	return best
+	for i := range ss {
+		d := &ss[i]
+		if !d.declaration || d.name != s.name || d.kind != s.kind {
+			continue
+		}
+		return d
+	}
+	return nil
 }
 func fileURI(path string) protocol.DocumentURI {
 	return protocol.DocumentURI(fileuri.FromPath(path))
@@ -201,11 +232,10 @@ func (h *Handler) definitionForText(uri protocol.DocumentURI, text string, posit
 				return nil
 			}
 			visited[path] = true
-			b, err := os.ReadFile(path)
+			txt, err := h.navigationText(fileURI(path))
 			if err != nil {
 				return nil
 			}
-			txt := string(b)
 			t, err := h.parser.Parse(path, txt)
 			if err != nil {
 				return nil
@@ -223,7 +253,7 @@ func (h *Handler) definitionForText(uri protocol.DocumentURI, text string, posit
 					for i := uint(0); i < n.ChildCount(); i++ {
 						c := n.Child(i)
 						if c.Kind() == "string" {
-							next = append(next, filepath.Join(filepath.Dir(path), strings.Trim(c.Utf8Text(b), "\"`")))
+							next = append(next, filepath.Join(filepath.Dir(path), strings.Trim(c.Utf8Text([]byte(txt)), "\"`")))
 						}
 					}
 				}
@@ -293,7 +323,7 @@ func (h *Handler) References(ctx context.Context, p *protocol.ReferenceParams) (
 		if candidate.name != s.name || candidate.kind != s.kind || candidate.declaration && !p.Context.IncludeDeclaration {
 			continue
 		}
-		if s.kind == "variable" {
+		if s.kind != "map" {
 			d := visibleDefinition(ss, &candidate)
 			if candidate.declaration {
 				d = &candidate

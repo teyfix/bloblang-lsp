@@ -127,6 +127,7 @@ func (h *Handler) Initialize(_ context.Context, params *protocol.InitializeParam
 			HoverProvider:              new(true),
 			DefinitionProvider:         new(true),
 			ReferencesProvider:         new(true),
+			RenameProvider:             &protocol.RenameOptions{PrepareProvider: new(true)},
 			DocumentFormattingProvider: new(true),
 			CodeActionProvider:         &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionQuickFix}},
 			InlayHintProvider:          &protocol.InlayHintOptions{},

@@ -11,5 +11,6 @@ Logs go to stderr. Stdout is reserved for JSON-RPC. Diagnostics publish asynchro
 - [Configuration](core/settings.md): startup server settings and live workspace editor JSON.
 - [Completion](features/completion.md), [hovers and previews](features/hover.md), [samples](features/sample.md), and [diagnostics](features/diagnostic.md).
 - [Lint behavior and fixes](features/lint.md) and [generated rule reference](features/lint-rules.md).
+- [Rename](features/rename.md): F2, scope handling, imports and embedded YAML.
 
 The remaining package and core design notes are marked historical where they describe the abandoned rewrite.
