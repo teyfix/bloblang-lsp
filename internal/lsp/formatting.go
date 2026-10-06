@@ -81,9 +81,19 @@ func (h *Handler) formatText(uri protocol.DocumentURI, text string, tabSize int)
 		return text, false
 	}
 	hasError := check.RootNode().HasError()
+	var formattedTokens []formatToken
+	tokens(check.RootNode(), []byte(result), &formattedTokens)
 	check.Close()
 	if hasError {
 		return text, false
+	}
+	if len(ts) != len(formattedTokens) {
+		return text, false
+	}
+	for i := range ts {
+		if ts[i].text != formattedTokens[i].text {
+			return text, false
+		}
 	}
 	// Reparse the formatted result before returning an edit.
 	if _, err := env.Parse(result); err != nil && originalErr == nil {

@@ -90,6 +90,12 @@ func nodeLayout(n *tree_sitter.Node, source []byte, size int) layout {
 	if n.ChildCount() == 0 || n.Kind() == "string" || n.Kind() == "comment" || n.Kind() == "number" {
 		return literal(n.Utf8Text(source))
 	}
+	if n.Kind() == "method_call" {
+		return chainLayout(n, source, size)
+	}
+	if n.Kind() == "call_expr" {
+		return callLayout(n, source, size)
+	}
 	var children []*tree_sitter.Node
 	for i := uint(0); i < n.ChildCount(); i++ {
 		c := n.Child(i)
@@ -111,13 +117,13 @@ func nodeLayout(n *tree_sitter.Node, source []byte, size int) layout {
 			first, _ := edgeTokens(c, source)
 			gap := string(source[prev.EndByte():c.StartByte()])
 			separator := literal("")
-			if prev.Kind() == "comment" {
-				separator = hardline()
-			} else if kind == "source" {
+			if kind == "source" {
 				separator = hardline()
 				if strings.Count(gap, "\n") > 1 {
 					separator = concat(hardline(), hardline())
 				}
+			} else if prev.Kind() == "comment" {
+				separator = hardline()
 			} else if block && (last == "{" || first == "}" || benthosStatement(c.Kind()) || c.Kind() == "match_case") {
 				separator = hardline()
 			} else if list && last == "," {
@@ -169,4 +175,110 @@ func nodeLayout(n *tree_sitter.Node, source []byte, size int) layout {
 		d = grouped(d)
 	}
 	return d
+}
+
+// A call owns only its arguments, never its receiver. Including the receiver in
+// this group made a long chain expand even tiny calls such as join("; ").
+func callLayout(n *tree_sitter.Node, source []byte, size int) layout {
+	name := n.ChildByFieldName("method")
+	if name == nil {
+		name = n.ChildByFieldName("function")
+	}
+	var args []layout
+	var previous *tree_sitter.Node
+	lambda := false
+	inside := false
+	for i := uint(0); i < n.ChildCount(); i++ {
+		c := n.Child(i)
+		if c.Kind() == "(" {
+			inside = true
+			continue
+		}
+		if !inside || c.Kind() == ")" {
+			continue
+		}
+		if previous != nil {
+			switch {
+			case previous.Kind() == "comment":
+				args = append(args, hardline())
+			case c.Kind() == "comment":
+				if strings.Contains(string(source[previous.EndByte():c.StartByte()]), "\n") {
+					args = append(args, hardline())
+				} else {
+					args = append(args, literal(" "))
+				}
+			case previous.Kind() == ",":
+				args = append(args, soft(" "))
+			}
+		}
+		lambda = lambda || c.Kind() == "lambda"
+		args = append(args, nodeLayout(c, source, size))
+		previous = c
+	}
+	start := literal(name.Utf8Text(source) + "(")
+	if len(args) == 0 {
+		return concat(start, literal(")"))
+	}
+	opening := soft("")
+	argumentIndent := size
+	if lambda {
+		// Keep the lambda parameter beside the method; its body can break at
+		// method boundaries independently of the enclosing call.
+		opening = literal("")
+		argumentIndent = 0
+	}
+	closing := soft("")
+	if previous.Kind() == "comment" {
+		closing = hardline()
+	}
+	return grouped(concat(start, nested(concat(opening, concat(args...)), argumentIndent), closing, literal(")")))
+}
+
+func chainLayout(n *tree_sitter.Node, source []byte, size int) layout {
+	var calls []*tree_sitter.Node
+	receiver := n
+	for receiver.Kind() == "method_call" {
+		calls = append(calls, receiver)
+		receiver = receiver.ChildByFieldName("object")
+	}
+	parts := []layout{nodeLayout(receiver, source, size)}
+	// A lambda already supplies useful break points inside its body. Keep the
+	// containing chain together so a trailing short call stays beside its ')'.
+	flexible := false
+	for _, call := range calls {
+		for i := uint(0); i < call.NamedChildCount(); i++ {
+			arg := call.NamedChild(i)
+			if arg.Kind() == "lambda" {
+				body := arg.ChildByFieldName("body")
+				flexible = flexible || body != nil && body.Kind() == "method_call" && body.ChildByFieldName("object").Kind() == "method_call"
+			}
+		}
+	}
+	continuation := false
+	for i := len(calls) - 1; i >= 0; i-- {
+		call := calls[i]
+		method := call.ChildByFieldName("method")
+		object := call.ChildByFieldName("object")
+		parts = append(parts, literal("."))
+		var comments []layout
+		for j := uint(0); j < call.ChildCount(); j++ {
+			c := call.Child(j)
+			if c.Kind() == "comment" && c.StartByte() >= object.EndByte() && c.EndByte() <= method.StartByte() {
+				comments = append(comments, hardline(), literal(c.Utf8Text(source)))
+			}
+		}
+		if len(comments) > 0 {
+			parts = append(parts, nested(concat(comments...), size), nested(hardline(), size))
+			continuation = true
+		} else if !flexible {
+			parts = append(parts, nested(soft(""), size))
+			continuation = true
+		}
+		d := callLayout(call, source, size)
+		if continuation {
+			d = nested(d, size)
+		}
+		parts = append(parts, d)
+	}
+	return grouped(concat(parts...))
 }

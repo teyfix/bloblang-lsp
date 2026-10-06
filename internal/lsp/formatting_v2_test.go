@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"fmt"
 	protocol "github.com/owenrumney/go-lsp/lsp"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
@@ -65,5 +66,69 @@ func TestWrappedYAMLScalarRemainsValid(t *testing.T) {
 		edits, e = h.Formatting(context.Background(), p)
 		require.NoError(t, e)
 		require.Empty(t, edits, updated)
+	}
+}
+
+func TestFormatMethodChainLambda(t *testing.T) {
+	h, uri := featureHandler(t)
+	text := `#!sample_from custom_sample.json
+
+map embed_input {
+  let movie = this
+  let segments = [
+    ["Title", $movie.title],
+    ["Overview", $movie.overview],
+    ["Tagline", $movie.tagline],
+    [
+      "Cast",
+      $movie.credits.cast.
+        slice(0, 10).
+        # character can be null
+        map_each(c -> c.with("character", "name").values().filter(cn -> cn.or("") != "").join(" – ")).
+        join("; "),
+    ],
+  ]
+  root = $segments
+}
+root = this.apply("embed_input")
+`
+	formatted, ok := h.formatText(uri, text, 2)
+	require.True(t, ok)
+	t.Log(formatted)
+	require.Contains(t, formatted, `).join("; ")`)
+	require.Contains(t, formatted, `join(" – ")`)
+	require.Contains(t, formatted, `      $movie.credits.cast.slice(0, 10).
+        # character can be null
+        map_each(c -> c.
+          with("character", "name").
+          values().
+          filter(cn -> cn.or("") != "").
+          join(" – ")
+        ).join("; "),`)
+	require.Contains(t, formatted, "#!sample_from custom_sample.json\n\nmap")
+	twice, ok := h.formatText(uri, formatted, 2)
+	require.True(t, ok)
+	require.Equal(t, formatted, twice)
+}
+
+func TestFormattingCallCommentsAndChainWidths(t *testing.T) {
+	h, uri := featureHandler(t)
+	for _, width := range []int{40, 80, 120} {
+		require.NoError(t, os.WriteFile(filepath.Join(h.workspaceRoot, ".bloblangrc.json"), []byte(fmt.Sprintf(`{"formatter":{"printWidth":%d}}`, width)), 0600))
+		for _, text := range []string{
+			`root = this.foo.uppercase().trim().replace("old", "new").split(";").join(" | ")`,
+			"root = this.foo.replace(\n# first argument\n\"a\", # replacement\n\"b\"\n)\n",
+			"root = this.foo.replace(\"a\", \"b\" # final argument\n)\n",
+			"root = this.foo.\n# first\nuppercase().\n# second\ntrim()\n",
+			`root = this.items.map_each(item -> item.with("title", "name").values().join(" – ")).join("; ")`,
+		} {
+			formatted, ok := h.formatText(uri, text, 2)
+			require.True(t, ok, text)
+			twice, ok := h.formatText(uri, formatted, 2)
+			require.True(t, ok)
+			require.Equal(t, formatted, twice)
+			_, err := h.benv.Parse(formatted)
+			require.NoError(t, err, formatted)
+		}
 	}
 }
